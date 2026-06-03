@@ -1,0 +1,1378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Epigenomic Network Browser</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous" />
+  <style>
+    body { background: #f5f7fa; }
+    .card { border-radius: 10px; }
+    #plots-section { display: none; }
+    .plot-img { max-width: 100%; border-radius: 6px; box-shadow: 0 1px 6px rgba(0,0,0,.12); }
+    #status-bar { font-size: 0.88em; min-height: 1.4em; }
+    #pct-label { font-weight: 600; min-width: 3.5em; display: inline-block; }
+    .spinner-border { width: 1.1rem; height: 1.1rem; border-width: 0.18em; vertical-align: middle; }
+    .section-heading { font-size: 1.05em; font-weight: 600; color: #344; margin-bottom: 0.5rem; }
+    /* Solver radio group */
+    .solver-choice { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 1rem; }
+    .solver-choice .form-check { margin: 0; }
+    .solver-choice .solver-desc { font-size: 0.82em; color: #6c757d; margin-left: 1.6rem; margin-top: 0.1rem; }
+  </style>
+</head>
+<body>
+<div class="container py-4" style="max-width:1100px">
+
+  <!-- Title -->
+  <div class="mb-4">
+    <h2 class="fw-bold mb-1">Epigenomic Network Browser</h2>
+    <p class="text-muted mb-0">Upload either a prebuilt/solved network JSON, or a Hi-C contact TSV plus TAD BED file.</p>
+  </div>
+
+  <!-- Upload card -->
+  <div class="card shadow-sm mb-4" id="upload-card" style="display: block">
+    <div class="card-body">
+      <h5 class="card-title mb-3">1) Load Data</h5>
+      <form id="upload-form">
+        <div class="row g-3 align-items-start">
+          <div class="col-md-5">
+            <label class="form-label fw-semibold" for="tsv-input">Hi-C contact file (.tsv) <span class="text-muted fw-normal">(tab-separated)</span></label>
+            <input class="form-control" type="file" id="tsv-input" accept=".tsv,.txt,.csv" multiple />
+            <small class="text-muted d-block mt-1">Select one or more TSV files (up to 10). Files will be merged.</small>
+            <div id="tsv-file-count" class="text-secondary small mt-1"></div>
+          </div>
+          <div class="col-md-5">
+            <label class="form-label fw-semibold" for="bed-input">TAD file (.bed)</label>
+            <input class="form-control" type="file" id="bed-input" accept=".bed,.txt" multiple />
+            <small class="text-muted d-block mt-1">Select one or more BED files (up to 10). Files will be merged.</small>
+            <div id="bed-file-count" class="text-secondary small mt-1"></div>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label fw-semibold" for="max-degree-input">Max degree</label>
+            <input class="form-control" type="number" id="max-degree-input" value="35" min="1" max="100" />
+          </div>
+          <div class="text-muted" style="font-size:0.86em;margin:3px 0 6px;font-style:italic">Note: Max degree limits the number of edges per node, keeping only its top k% of incident edges.</div>
+          <div class="col-12">
+            <div class="text-muted" style="font-size:0.86em;margin:3px 0 6px">OR upload a prebuilt/solved graph JSON (with <code>nodes</code> and <code>edges</code>)</div>
+            <input class="form-control" type="file" id="json-input" accept=".json,application/json" autocomplete="off"/>
+          </div>
+          <div class="col-12" id="json-3d-option" style="display:none; margin-top: 0.5rem;">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" value="" id="json-3d-checkbox">
+              <label class="form-check-label" for="json-3d-checkbox">
+                Render this exported JSON as a 3D graph after upload
+              </label>
+            </div>
+            <div class="form-text text-muted" style="font-size:0.82em;">
+              Requires solved node positions in the uploaded JSON file.
+            </div>
+          </div>
+        </div>
+        <div class="mt-3 d-flex align-items-center gap-3">
+          <button type="submit" class="btn btn-primary px-4" id="upload-btn">
+            <span id="upload-spinner" class="spinner-border me-1 d-none" role="status"></span>
+            Load &amp; Analyze
+          </button>
+          <button type="button" class="btn btn-outline-danger px-4" id="clear-upload-btn">
+            Clear Uploads
+          </button>
+          <span id="status-bar" class="text-muted"></span>
+          <button class="btn btn-outline-primary px-4 ms-auto" id="download-json-btn" type="button" style="display:none;">
+            Download JSON
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Chromosome selection card (for multi-chromosome uploads) -->
+  <div class="card shadow-sm mb-4" id="chromosome-selection-section" style="display:none">
+    <div class="card-body">
+      <h5 class="card-title mb-3">2a) Select Chromosomes</h5>
+      <p class="text-muted small mb-3">Multiple chromosomes detected in your upload. Choose which chromosomes to include in the network (rows are kept only if both incident chromosomes are selected).</p>
+      <div id="chromosome-checkboxes" style="display:flex; flex-wrap:wrap; gap:0.5rem;"></div>
+      <div style="margin-top:0.75rem; display:flex; gap:0.5rem;">
+        <button class="btn btn-primary px-4" id="apply-chromosomes-btn">Apply Chromosome Selection</button>
+        <button class="btn btn-outline-secondary px-4" id="skip-chromosomes-btn">Skip (use all)</button>
+      </div>
+      <div style="margin-top:0.6rem; font-size:0.9rem; color:#374151;" id="chromosome-selection-status"></div>
+    </div>
+  </div>
+  
+  <!-- Column name transformation review -->
+  <div class="card shadow-sm mb-4" id="column-review-section" style="display:none" autocomplete="off">
+    <div class="card-body">
+      <h5 class="card-title mb-3">2b) Review Column Names</h5>
+      <p class="text-muted small mb-3">Column names have been automatically cleaned. Review and edit if needed:</p>
+      <div id="column-transformations-list" style="display:flex; flex-direction:column; gap:0.75rem;"></div>
+      <div style="margin-top:1rem; display:flex; gap:0.5rem;">
+        <button class="btn btn-primary px-4" id="confirm-column-names-btn">
+          Confirm &amp; Continue
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Distribution plots card -->
+  <div id="plots-section">
+    <div class="card shadow-sm mb-4">
+      <div class="card-body">
+        <h5 class="card-title mb-3">3a) Data Distributions</h5>
+        <p class="text-muted mb-3" id="data-summary"></p>
+
+        <!-- Edge weight plot -->
+        <div class="section-heading">Edge Weights (log-normalised)</div>
+        <div class="mb-4">
+          <img id="plot-edge-weights" class="plot-img" style="max-height:420px" alt="Edge weight distribution" />
+        </div>
+
+        <!-- Histone mark plots -->
+        <div class="section-heading">Histone / Annotation Distributions (z-score)</div>
+        <div class="row g-3" id="histone-plots-row"></div>
+      </div>
+    </div>
+
+    <!-- Annotation Configuration card -->
+    <div class="card shadow-sm mb-4" id="annotation-config-section" style="display:none">
+      <div class="card-body">
+        <h5 class="card-title mb-3">3b) Configure Annotations</h5>
+        <p class="text-muted mb-3">Select which annotation columns to include and how to display them.</p>
+        
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Available Annotations (select up to 7)</label>
+          <div id="annotations-checkboxes" class="row g-2"></div>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Node Sizing (percentile-scaled)</label>
+          <select class="form-select" id="node-sizing-column">
+            <option value="">Default (size=12)</option>
+          </select>
+        </div>
+
+        <div id="annotation-display-modes"></div>
+
+        <div class="d-flex justify-content-between align-items-center" style="margin-top:10px; gap:1rem;">
+          <button class="btn btn-secondary px-4" id="configure-annotations-btn">
+            <span id="config-spinner" class="spinner-border me-1 d-none" role="status"></span>
+            Save Configuration
+          </button>
+        </div>
+        <div style="margin-top:0.75rem;">
+          <span id="config-status-msg" style="font-size:0.88em;"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card shadow-sm mb-4" id="genome-selection-section" style="display:none">
+      <div class="card-body">
+        <h5 class="card-title mb-3">3c) Select Reference Genome</h5>
+        <p class="text-muted mb-3">Choose the IGV reference genome for gene report generation.</p>
+        <div class="row g-3 align-items-end">
+          <div class="col-md-8">
+            <label class="form-label" for="genome-select">Reference genome</label>
+            <select id="genome-select" class="form-select form-select-sm"></select>
+          </div>
+          <div class="col-md-4 d-flex align-items-center">
+            <button type="button" class="btn btn-outline-primary w-100" onclick="confirmGenomeSelection()">Select</button>
+          </div>
+        </div>
+        <div id="genome-selection-confirmation" class="mt-3" style="font-size:0.95rem;color:#374151"></div>
+      </div>
+    </div>
+
+    <!-- Edge percentile selector -->
+    <div class="card shadow-sm mb-4" id="percentile-section" style="display:none">
+      <div class="card-body">
+        <h5 class="card-title mb-1">4) Select Edge Weight Percentile</h5>
+        <p class="text-muted mb-3">The top <strong id="pct-label">100</strong>% of edges (by weight) will be included in the network.</p>
+        <div class="d-flex align-items-center gap-3 mb-2">
+          <span class="text-muted" style="white-space:nowrap;font-size:0.88em">Top 1%</span>
+          <input type="range" class="form-range" id="pct-slider" min="1" max="100" value="100" step="1" style="flex:1" />
+          <span class="text-muted" style="white-space:nowrap;font-size:0.88em">Top 100%</span>
+        </div>
+        <div class="text-muted mb-3" id="pct-info" style="font-size:0.88em"></div>
+        <div class="text-muted" style="font-size:0.86em;margin:3px 0 6px">Selecting a lower percentile will result in fewer edges but more accurate edge weights.</div>
+
+        <!-- Solver selection (hidden when JSON is uploaded) -->
+        <div id="solver-section" class="mt-3 mb-1">
+          <div class="fw-semibold mb-2" style="font-size:0.95em">Physics solver</div>
+          <div class="solver-choice">
+            <div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="solver" id="solver-barneshut" value="barnesHut" checked>
+                <label class="form-check-label fw-semibold" for="solver-barneshut">BarnesHut</label>
+              </div>
+              <div class="solver-desc">Fast multipole approximation — best for large networks (&gt;500 nodes). Lower CPU cost; nodes cluster by connectivity.</div>
+            </div>
+            <div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="solver" id="solver-forceatlas2" value="forceAtlas2Based">
+                <label class="form-check-label fw-semibold" for="solver-forceatlas2">ForceAtlas2Based</label>
+              </div>
+              <div class="solver-desc">Hub-aware layout — penalises high-degree hubs and spreads them outward. Better visual separation for scale-free biological networks.</div>
+            </div>
+          </div>
+        </div>
+
+        <button class="btn btn-success px-4" id="build-btn">
+          <span id="build-spinner" class="spinner-border me-1 d-none" role="status"></span>
+          Build Network
+        </button>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+<script>
+  
+  window.addEventListener('DOMContentLoaded', function() {
+    // Reset all file inputs (browser won't clear these on refresh otherwise)
+    document.getElementById('upload-form').reset();
+
+    // Reset file count labels
+    document.getElementById('tsv-file-count').textContent = '';
+    document.getElementById('bed-file-count').textContent = '';
+
+    // Reset status bar
+    document.getElementById('status-bar').textContent = '';
+    document.getElementById('status-bar').className = 'text-muted';
+
+    // Reset 3D checkbox and hide its wrapper
+    document.getElementById('json-3d-checkbox').checked = false;
+    document.getElementById('json-3d-option').style.display = 'none';
+
+    // Hide all downstream cards
+    document.getElementById('column-review-section').style.display = 'none';
+    document.getElementById('chromosome-selection-section').style.display = 'none';
+    document.getElementById('plots-section').style.display = 'none';
+    document.getElementById('download-json-btn').style.display = 'none';
+
+    // Reset solver section visibility
+    const solverSection = document.getElementById('solver-section');
+    if (solverSection) solverSection.style.display = 'block';
+
+    // Reset percentile slider to default
+    document.getElementById('pct-slider').value = 100;
+    document.getElementById('pct-label').textContent = '100';
+
+    // Reset all JS state variables
+    sessionToken = null;
+    percentileTable = [];
+    uploadWasTsvBed = false;
+    uploadWasJson = false;
+    uploadWasPrecomputedJson = false;
+    selectedGenome = 'hg38';
+    columnOverrides = {};
+    currentColumnTransformations = [];
+    currentDetectedAnnotations = [];
+    currentAnnotationDefaults = {};
+    currentPlots = {};
+    currentAnnotationStats = {};
+    networkTab = null;
+  });
+
+  let sessionToken = null;
+  let percentileTable = [];  // [{percentile, threshold, edge_count}]
+  let uploadWasTsvBed = false;
+  let uploadWasJson = false;
+  let uploadWasPrecomputedJson = false;
+  let selectedGenome = 'hg38';
+
+  // Column transformations state
+  let columnOverrides = {};
+  let currentColumnTransformations = [];
+  let currentDetectedAnnotations = [];
+  let currentAnnotationDefaults = {};
+  let currentPlots = {};
+  let currentAnnotationStats = {};
+
+  let networkTab = null;
+
+  const IGV_HOSTED_GENOMES = [
+    { id: 'hg38', label: 'Human (GRCh38/hg38)' },
+    { id: 'hg19', label: 'Human (GRCh37/hg19)' },
+    { id: 'mm39', label: 'Mouse (mm39)' },
+    { id: 'mm10', label: 'Mouse (mm10)' },
+    { id: 'rn7', label: 'Rat (rn7)' },
+    { id: 'ce11', label: 'C. elegans (ce11)' },
+    { id: 'dm6', label: 'D. melanogaster (dm6)' },
+    { id: 'tair10', label: 'A. thaliana (TAIR 10)' },
+    { id: 'sacCer3', label: 'S. cerevisiae (sacCer3)' },
+    { id: 'danRer11', label: 'Zebrafish (GRCz11/danRer11)' },
+    { id: 'danRer10', label: 'Zebrafish (GRCz10/danRer10)' },
+  ];
+
+  function fmt(v) { return v % 1 === 0 ? (v).toFixed(0) : (v).toFixed(3); }
+
+  function showJson3dOption(show) {
+    const wrapper = document.getElementById('json-3d-option');
+    if (show) {
+      wrapper.style.display = 'block';
+    } else {
+      wrapper.style.display = 'none';
+      document.getElementById('json-3d-checkbox').checked = false;
+    }
+  }
+
+  function isSolvableJsonNode(node) {
+    if (!node || typeof node !== 'object') return false;
+    if (node.x !== undefined && node.y !== undefined) return true;
+    if (node.data && typeof node.data === 'object' && node.data.x !== undefined && node.data.y !== undefined) return true;
+    return false;
+  }
+
+  async function inspectJsonFor3D(file) {
+    if (!file) { showJson3dOption(false); return; }
+    try {
+        // Only read the first 32KB — enough to find node x/y without parsing the whole file
+        const slice = file.slice(0, 32768);
+        const text = await slice.text();
+        // Look for "x": or "y": near a node — cheap heuristic
+        if (/"x"\s*:/.test(text) && /"y"\s*:/.test(text)) {
+            showJson3dOption(true);
+            return;
+        }
+    } catch (err) { /* ignore */ }
+    showJson3dOption(false);
+  }
+
+  // Hide solver UI when a JSON is uploaded (physics is disabled for pre-solved layouts)
+  document.getElementById('json-input').addEventListener('change', function() {
+    inspectJsonFor3D(this.files[0]);
+    const solverSection = document.getElementById('solver-section');
+    if (solverSection) {
+      solverSection.style.display = this.files.length > 0 ? 'none' : 'block';
+    }
+  });
+
+  // Update file count display
+  document.getElementById('tsv-input').addEventListener('change', function() {
+    const count = this.files.length;
+    const display = document.getElementById('tsv-file-count');
+    if (count > 0) {
+      display.textContent = count + ' file' + (count !== 1 ? 's' : '') + ' selected';
+    } else {
+      display.textContent = '';
+    }
+  });
+
+  document.getElementById('bed-input').addEventListener('change', function() {
+    const count = this.files.length;
+    const display = document.getElementById('bed-file-count');
+    if (count > 0) {
+      display.textContent = count + ' file' + (count !== 1 ? 's' : '') + ' selected';
+    } else {
+      display.textContent = '';
+    }
+  });
+
+  document.getElementById('clear-upload-btn').addEventListener('click', function() {
+    document.getElementById('tsv-input').value = '';
+    document.getElementById('bed-input').value = '';
+    document.getElementById('json-input').value = '';
+    document.getElementById('tsv-file-count').textContent = '';
+    document.getElementById('bed-file-count').textContent = '';
+    document.getElementById('status-bar').textContent = 'Upload fields cleared.';
+    document.getElementById('status-bar').className = 'text-muted';
+    document.getElementById('json-3d-checkbox').checked = false;
+    showJson3dOption(false);
+    uploadWasTsvBed = false;
+    uploadWasJson = false;
+    uploadWasPrecomputedJson = false;
+    document.getElementById('download-json-btn').style.display = 'none';
+    document.getElementById('column-review-section').style.display = 'none';
+    document.getElementById('chromosome-selection-section').style.display = 'none';
+    document.getElementById('plots-section').style.display = 'none';
+    networkTab = null;
+  });
+
+  async function pollUntilReady(token) {
+    let dots = 0;
+    while (true) {
+      await new Promise(r => setTimeout(r, 2000));
+      dots = (dots + 1) % 4;
+      setStatus('Processing data' + '.'.repeat(dots + 1) + ' (large files may take a minute)', true);
+      const pollResp = await fetch(`/upload_status/${token}`);
+      const polled = await pollResp.json();
+      if (polled.status === 'processing') continue;
+      if (polled.status === 'error') throw new Error(polled.error || 'Unknown error');
+      if (polled.status === 'awaiting_chromosomes') return polled;
+      return polled;
+    }
+  }
+
+  // Upload form
+  document.getElementById('upload-form').addEventListener('submit', async function(evt) {
+    evt.preventDefault();
+    evt.stopPropagation();
+
+    const tsvFiles = Array.from(document.getElementById('tsv-input').files);
+    const bedFiles = Array.from(document.getElementById('bed-input').files);
+    const jsonFile = document.getElementById('json-input').files[0];
+    const maxDegree = document.getElementById('max-degree-input').value;
+    const hasJson = !!jsonFile;
+    const hasTsvBed = tsvFiles.length > 0 && bedFiles.length > 0;
+    
+    if (!hasJson && !hasTsvBed) {
+      setStatus('Please upload either a JSON file, or both TSV and BED files.', false, true);
+      return;
+    }
+
+    if (tsvFiles.length > 10 || bedFiles.length > 10) {
+      setStatus('Maximum 10 files per type allowed.', false, true);
+      return;
+    }
+
+    uploadWasTsvBed = hasTsvBed && !hasJson;
+    uploadWasJson = hasJson;
+    setStatus('Uploading and processing data…', true);
+    toggleUploadBtn(true);
+    networkTab = null;
+
+    const fd = new FormData();
+    if (jsonFile) {
+      fd.append('json_file', jsonFile);
+    }
+    tsvFiles.forEach(function(file) {
+      fd.append('tsv_files', file);
+    });
+    bedFiles.forEach(function(file) {
+      fd.append('bed_files', file);
+    });
+    fd.append('max_degree', maxDegree);
+
+    try {
+      const resp = await fetch('/upload', { method: 'POST', body: fd });
+      const initial = await resp.json();
+
+      if (initial.error) {
+        setStatus('Error: ' + initial.error, false, true);
+        toggleUploadBtn(false);
+        return;
+      }
+
+      sessionToken = initial.token;
+
+      let result = initial;
+      if (initial.status === 'processing') {
+        try {
+          result = await pollUntilReady(sessionToken);
+        } catch (err) {
+          setStatus('Error: ' + err.message, false, true);
+          toggleUploadBtn(false);
+          return;
+        }
+      }
+
+      if (result.error) {
+        setStatus('Error: ' + result.error, false, true);
+        toggleUploadBtn(false);
+        return;
+      }
+
+      if (result.status === 'awaiting_chromosomes') {
+        renderChromosomeSelection(result.available_chromosomes);
+        document.getElementById('chromosome-selection-section').style.display = 'block';
+        document.getElementById('column-review-section').style.display = 'none';
+        document.getElementById('plots-section').style.display = 'none';
+        document.getElementById('annotation-config-section').style.display = 'none';
+        document.getElementById('download-json-btn').style.display = 'none';
+        setStatus('Chromosome scan complete. Please select chromosomes to include.', false);
+        toggleUploadBtn(false);
+        return;
+      }
+
+      showJson3dOption(!!result.can_render_3d && !!jsonFile);
+      if (result.can_render_3d && document.getElementById('json-3d-checkbox').checked) {
+        window.location.href = `/graph3d/${sessionToken}`;
+        return;
+      }
+
+      uploadWasPrecomputedJson = result.is_physics_solved_export || false;
+
+      document.getElementById('data-summary').textContent =
+        `Loaded ${result.total_nodes.toLocaleString()} nodes and ${result.total_edges.toLocaleString()} edges objects.`;
+
+      currentColumnTransformations = result.column_transformations || [];
+      currentDetectedAnnotations = result.detected_annotations || [];
+      currentAnnotationDefaults = result.annotation_defaults || {};
+      currentPlots = result.plots;
+      currentAnnotationStats = result.annotation_stats;
+      percentileTable = result.percentile_table;
+
+      // Check if we need chromosome selection
+      const needsChromosomeSelection = (uploadWasJson && result.available_chromosomes && result.available_chromosomes.length > 0) ||
+          (uploadWasTsvBed && result.available_chromosomes && result.available_chromosomes.length > 1);
+      
+      if (needsChromosomeSelection) {
+        renderChromosomeSelection(result.available_chromosomes);
+        document.getElementById('chromosome-selection-section').style.display = 'block';
+        document.getElementById('column-review-section').style.display = 'none';
+        document.getElementById('plots-section').style.display = 'none';
+        setStatus('Chromosome scan complete. Please select chromosomes to include.', false);
+        toggleUploadBtn(false);
+        return;
+      } else {
+        // No chromosome selection needed, proceed to column review or plots
+        if (result.column_transformations && result.column_transformations.length > 0) {
+          renderColumnTransformations(result.column_transformations);
+          document.getElementById('column-review-section').style.display = 'block';
+          document.getElementById('plots-section').style.display = 'none';
+          setStatus('Please review and confirm column names.', false);
+        } else {
+          showDataAndNextSteps(result);
+        }
+      }
+
+      document.getElementById('download-json-btn').style.display = uploadWasTsvBed ? 'inline-flex' : 'none';
+      updatePctInfo(100);
+
+    } catch (err) {
+      setStatus('Upload failed: ' + err, false, true);
+    }
+    toggleUploadBtn(false);
+  });
+
+  // Confirm column names button handler
+  document.getElementById('confirm-column-names-btn').addEventListener('click', function() {
+    applyCleanedColumnNames();
+  });
+
+  // Column transformations rendering and management
+  function renderColumnTransformations(transformations) {
+    columnOverrides = {};
+    const listDiv = document.getElementById('column-transformations-list');
+    listDiv.innerHTML = '';
+
+    transformations.forEach(function(item) {
+      const original = item.original;
+      const cleaned = item.cleaned;
+      const isChanged = original !== cleaned;
+
+      const row = document.createElement('div');
+      row.style.display = 'flex';
+      row.style.alignItems = 'center';
+      row.style.gap = '0.5rem';
+      row.style.padding = '0.5rem 0.75rem';
+      row.style.backgroundColor = isChanged ? '#fff3cd' : '#f8f9fa';
+      row.style.borderRadius = '4px';
+      row.style.border = '1px solid ' + (isChanged ? '#ffc107' : '#dee2e6');
+
+      const label = document.createElement('div');
+      label.style.flex = '1';
+      label.style.fontSize = '0.95em';
+      label.innerHTML = '<code style="background:#f0f0f0; padding:2px 6px; border-radius:3px;">' + 
+        escapeHtml(original) + '</code> → <strong style="color:#059669;">' + escapeHtml(cleaned) + '</strong>';
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn btn-sm btn-outline-secondary';
+      btn.textContent = 'Incorrect?';
+      btn.style.whiteSpace = 'nowrap';
+      btn.addEventListener('click', function() {
+        toggleEditField(original, cleaned, row);
+      });
+
+      row.appendChild(label);
+      row.appendChild(btn);
+      listDiv.appendChild(row);
+    });
+  }
+
+  function toggleEditField(original, currentCleaned, rowDiv) {
+    const existingInput = rowDiv.querySelector('input[type="text"]');
+    if (existingInput) {
+      rowDiv.style.backgroundColor = '#f8f9fa';
+      rowDiv.style.border = '1px solid #dee2e6';
+      existingInput.remove();
+      const saveBtn = rowDiv.querySelector('.save-override-btn');
+      if (saveBtn) saveBtn.remove();
+      return;
+    }
+
+    rowDiv.style.backgroundColor = '#fff3cd';
+    rowDiv.style.border = '1px solid #ffc107';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'form-control form-control-sm';
+    input.value = currentCleaned;
+    input.style.flex = '1';
+    input.style.marginLeft = '1rem';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.className = 'btn btn-sm btn-primary save-override-btn';
+    saveBtn.textContent = 'Save';
+    saveBtn.style.whiteSpace = 'nowrap';
+    saveBtn.addEventListener('click', async function() {
+      const newCleaned = input.value.trim();
+      if (!newCleaned) {
+        alert('Please enter a name');
+        return;
+      }
+
+      try {
+        const resp = await fetch('/set_column_override', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: sessionToken, original: original, new_cleaned: newCleaned })
+        });
+        const result = await resp.json();
+        if (result.success) {
+          columnOverrides[original] = newCleaned;
+          const label = rowDiv.querySelector('div:first-child');
+          label.innerHTML = '<code style="background:#f0f0f0; padding:2px 6px; border-radius:3px;">' + 
+            escapeHtml(original) + '</code> → <strong style="color:#059669;">' + escapeHtml(newCleaned) + '</strong>';
+          input.remove();
+          saveBtn.remove();
+          rowDiv.style.backgroundColor = '#d4edda';
+          rowDiv.style.border = '1px solid #28a745';
+        }
+      } catch (err) {
+        alert('Failed to save override: ' + err);
+      }
+    });
+
+    rowDiv.appendChild(input);
+    rowDiv.appendChild(saveBtn);
+    input.focus();
+  }
+
+  // -------------------------------------------------------------------------
+  // Chromosome selection UI
+  // -------------------------------------------------------------------------
+  function renderChromosomeSelection(chromosomes) {
+    const container = document.getElementById('chromosome-checkboxes');
+    container.innerHTML = '';
+    chromosomes.forEach(function(ch) {
+      const id = 'chrom-' + ch.replace(/[^a-zA-Z0-9_\-]/g, '_');
+      const wrapper = document.createElement('div');
+      wrapper.style.display = 'flex';
+      wrapper.style.alignItems = 'center';
+      wrapper.style.gap = '0.5rem';
+
+      const chk = document.createElement('input');
+      chk.type = 'checkbox';
+      chk.id = id;
+      chk.value = ch;
+      chk.checked = true;
+
+      const lbl = document.createElement('label');
+      lbl.htmlFor = id;
+      lbl.textContent = ch;
+
+      wrapper.appendChild(chk);
+      wrapper.appendChild(lbl);
+      container.appendChild(wrapper);
+    });
+    document.getElementById('chromosome-selection-status').textContent = '';
+  }
+
+  document.getElementById('apply-chromosomes-btn').addEventListener('click', async function() {
+    const chkNodes = Array.from(document.querySelectorAll('#chromosome-checkboxes input[type="checkbox"]'));
+    const selected = chkNodes.filter(c=>c.checked).map(c=>c.value);
+    if (!sessionToken) {
+      document.getElementById('chromosome-selection-status').textContent = 'Missing session token.';
+      return;
+    }
+    setStatus('Applying chromosome selection…', true);
+    // Disable both buttons to prevent double submissions (keep card visible)
+    disableAllProcessingButtons(true);
+    try {
+      const resp = await fetch('/select_chromosomes', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({token: sessionToken, selected_chromosomes: selected})
+      });
+      const res = await resp.json();
+      if (res.error) {
+        document.getElementById('chromosome-selection-status').textContent = 'Error: ' + res.error;
+        setStatus('Error applying chromosome selection.', false, true);
+        disableAllProcessingButtons(false);
+        return;
+      }
+      let result;
+      try {
+        result = await pollUntilReady(sessionToken);
+      } catch (err) {
+        setStatus('Error: ' + err.message, false, true);
+        disableAllProcessingButtons(false);
+        return;
+      }
+
+      currentColumnTransformations = result.column_transformations || [];
+      currentDetectedAnnotations   = result.detected_annotations   || [];
+      currentAnnotationDefaults    = result.annotation_defaults    || {};
+      currentPlots                 = result.plots                  || {};
+      currentAnnotationStats       = result.annotation_stats       || {};
+      percentileTable              = result.percentile_table       || [];
+
+      document.getElementById('data-summary').textContent =
+        `Loaded ${(result.total_nodes||0).toLocaleString()} nodes and ${(result.total_edges||0).toLocaleString()} edges objects.`;
+
+      if (currentColumnTransformations.length > 0) {
+        renderColumnTransformations(currentColumnTransformations);
+        document.getElementById('column-review-section').style.display = 'block';
+        document.getElementById('plots-section').style.display = 'none';
+      } else {
+        showDataAndNextSteps(result);
+      }
+      updatePctInfo(100);
+      disableAllProcessingButtons(false);
+      setStatus('Chromosome selection applied.', false);
+    } catch (err) {
+      document.getElementById('chromosome-selection-status').textContent = 'Failed: ' + err;
+      setStatus('Failed to apply chromosome selection.', false, true);
+      disableAllProcessingButtons(false);
+    }
+  });
+
+  document.getElementById('skip-chromosomes-btn').addEventListener('click', async function() {
+    if (!sessionToken) return;
+    setStatus('Processing all chromosomes…', true);
+    // Disable both buttons to prevent double submissions (keep card visible)
+    disableAllProcessingButtons(true);
+    try {
+      const resp = await fetch('/select_chromosomes', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({token: sessionToken, selected_chromosomes: []})
+      });
+      const res = await resp.json();
+      if (res.error) {
+        setStatus('Error: ' + res.error, false, true);
+        disableAllProcessingButtons(false);
+        return;
+      }
+      let result;
+      try {
+        result = await pollUntilReady(sessionToken);
+      } catch (err) {
+        setStatus('Error: ' + err.message, false, true);
+        disableAllProcessingButtons(false);
+        return;
+      }
+
+      currentColumnTransformations = result.column_transformations || [];
+      currentDetectedAnnotations   = result.detected_annotations   || [];
+      currentAnnotationDefaults    = result.annotation_defaults    || {};
+      currentPlots                 = result.plots                  || {};
+      currentAnnotationStats       = result.annotation_stats       || {};
+      percentileTable              = result.percentile_table       || [];
+
+      document.getElementById('data-summary').textContent =
+        `Loaded ${(result.total_nodes||0).toLocaleString()} nodes and ${(result.total_edges||0).toLocaleString()} edges objects.`;
+
+      if (currentColumnTransformations.length > 0) {
+        renderColumnTransformations(currentColumnTransformations);
+        document.getElementById('column-review-section').style.display = 'block';
+        document.getElementById('plots-section').style.display = 'none';
+      } else {
+        showDataAndNextSteps(result);
+      }
+      updatePctInfo(100);
+      disableAllProcessingButtons(false);
+      setStatus('Using all chromosomes.', false);
+    } catch (err) {
+      setStatus('Failed: ' + err, false, true);
+      disableAllProcessingButtons(false);
+    }
+  });
+
+  function escapeHtml(text) {
+    const map = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#039;'
+    };
+    return text.replace(/[&<>"']/g, m => map[m]);
+  }
+
+  function applyCleanedColumnNames() {
+    const cleanedNameMap = {};
+    if (currentColumnTransformations.length > 0) {
+      currentColumnTransformations.forEach(item => {
+        const cleanedName = columnOverrides[item.original] || item.cleaned;
+        cleanedNameMap[item.original] = cleanedName;
+      });
+    }
+
+    const row = document.getElementById('histone-plots-row');
+    row.innerHTML = '';
+
+    for (const [key, value] of Object.entries(currentPlots)) {
+      if (key === 'edge_weights') {
+        document.getElementById('plot-edge-weights').src = 'data:image/png;base64,' + value;
+        continue;
+      }
+      
+      const displayName = cleanedNameMap[key] || key;
+      
+      const col = document.createElement('div');
+      col.className = 'col-12';
+      let html = '<div class="text-left mt-1" style="font-size:1.2em; text-decoration: underline; font-weight: bold">' + displayName + '</div>'
+        + '<img class="plot-img" src="data:image/png;base64,' + value
+        + '" alt="' + displayName + '" title="' + displayName + '" style="max-height:420px" />';
+      if (currentAnnotationStats && currentAnnotationStats[key]) {
+        const s = currentAnnotationStats[key];
+        html += '<div class="text-left mt-2" style="font-size:1em; line-height:1.4;">'
+          + `Count: ${s.count} | Mean: ${fmt(s.mean)} | Std: ${fmt(s.std)}<br>`
+          + `Min: ${fmt(s.min)} | Q25: ${fmt(s.q25)} | Q50: ${fmt(s.q50)} | Q75: ${fmt(s.q75)} | Max: ${fmt(s.max)}`
+          + '</div>';
+      }
+      col.innerHTML = html;
+      row.appendChild(col);
+    }
+
+    const cleanedAnnotations = currentDetectedAnnotations.map(col => cleanedNameMap[col] || col);
+    renderAnnotationConfigWithCleanedNames(cleanedAnnotations, currentDetectedAnnotations, currentAnnotationDefaults, cleanedNameMap);
+    
+    annotationDefaults = currentAnnotationDefaults;
+    
+    document.getElementById('plots-section').style.display = 'block';
+    document.getElementById('annotation-config-section').style.display = 'block';
+    if (document.getElementById('annotation-config-section').style.display === 'none') {
+      renderGenomeSelector();
+    }
+    
+    document.getElementById('column-review-section').style.display = 'none';
+    
+    setStatus('Column names confirmed. Configure annotations and select genome.', false);
+  }
+
+  function renderAnnotationConfigWithCleanedNames(cleanedAnnotations, originalAnnotations, defaults, cleanedNameMap) {
+    const checkboxesDiv = document.getElementById('annotations-checkboxes');
+    checkboxesDiv.innerHTML = '';
+    
+    const maxAnnotations = 7;
+    originalAnnotations.slice(0, maxAnnotations).forEach(function(originalCol, idx) {
+      const cleanedCol = cleanedNameMap[originalCol] || originalCol;
+      const col_div = document.createElement('div');
+      col_div.className = 'col-md-6 col-lg-4';
+      const id = 'annot-check-' + originalCol;
+      col_div.innerHTML = `<div class="form-check">
+        <input class="form-check-input annotation-checkbox" type="checkbox" id="${id}" data-column="${originalCol}" data-cleaned="${cleanedCol}" checked>
+        <label class="form-check-label" for="${id}">${cleanedCol}</label>
+      </div>`;
+      checkboxesDiv.appendChild(col_div);
+    });
+    
+    const nodeSizingSelect = document.getElementById('node-sizing-column');
+    nodeSizingSelect.innerHTML = '<option value="">Default (size=12)</option>';
+    originalAnnotations
+      .filter(function(col) {
+        const cfg = defaults.annotations[col] || {};
+        return cfg.color_mode !== 'categorical';
+      })
+      .forEach(function(originalCol) {
+        const cleanedCol = cleanedNameMap[originalCol] || originalCol;
+        const opt = document.createElement('option');
+        opt.value = originalCol;
+        opt.textContent = cleanedCol;
+        if (defaults.node_sizing_column === originalCol) opt.selected = true;
+        nodeSizingSelect.appendChild(opt);
+      });
+    
+    updateAnnotationDisplayModesWithCleaned(cleanedNameMap);
+    
+    document.querySelectorAll('.annotation-checkbox').forEach(function(cb) {
+      cb.addEventListener('change', function() {
+        updateAnnotationDisplayModesWithCleaned(cleanedNameMap);
+      });
+    });
+  }
+
+  function updateAnnotationDisplayModesWithCleaned(cleanedNameMap) {
+    const selected = Array.from(document.querySelectorAll('.annotation-checkbox:checked'))
+      .map(cb => ({ original: cb.dataset.column, cleaned: cb.dataset.cleaned }));
+    
+    const modesDiv = document.getElementById('annotation-display-modes');
+    modesDiv.innerHTML = '';
+    
+    if (selected.length === 0) {
+      modesDiv.innerHTML = '<p class="text-muted" style="font-size:0.88em">Select annotations above to configure display modes.</p>';
+      return;
+    }
+    
+    modesDiv.innerHTML = '<div class="section-heading mt-3 mb-3">Display Modes</div>';
+    
+    const gridContainer = document.createElement('div');
+    gridContainer.style.display = 'flex';
+    gridContainer.style.flexDirection = 'column';
+    gridContainer.style.gap = '1rem';
+    modesDiv.appendChild(gridContainer);
+    
+    selected.forEach(function(item) {
+      const originalCol = item.original;
+      const cleanedCol = item.cleaned;
+      const config = currentAnnotationDefaults.annotations[originalCol] || {};
+      const mode = config.color_mode || 'linear';
+      const colorStart = config.color_start || '#f7fbff';
+      const colorEnd = config.color_end || '#08306b';
+      const colorA = config.color_A || '#ff8c00';
+      const colorB = config.color_B || '#9b30ff';
+      const cfg = currentAnnotationDefaults.annotations[originalCol];
+      const isCompartment = cfg && cfg.color_mode === 'categorical';
+      
+      const colDiv = document.createElement('div');
+      colDiv.className = 'p-2 border rounded';
+      if (isCompartment) {
+        colDiv.innerHTML = `
+          <div class="fw-semibold mb-2" style="font-size:0.95em">${cleanedCol} <span class="badge bg-secondary" style="font-size:0.75em">categorical A/B</span></div>
+          <div style="display:flex; flex-direction:row; gap:0.75rem">
+            <div>
+              <label class="form-label fw-normal" style="font-size:0.88em">Compartment A Color</label>
+              <input type="color" class="form-control form-control-color" value="${colorA}" data-column="${originalCol}" data-type="color_A" multiple autocomplete="off">
+            </div>
+            <div>
+              <label class="form-label fw-normal" style="font-size:0.88em">Compartment B Color</label>
+              <input type="color" class="form-control form-control-color" value="${colorB}" data-column="${originalCol}" data-type="color_B" multiple autocomplete="off">
+            </div>
+          </div>`;
+      } else {
+        colDiv.innerHTML = `
+          <div class="fw-semibold mb-2" style="font-size:0.95em">${cleanedCol}</div>
+          <div style="display:flex; align-items:flex-start; gap:1rem">
+            <div style="flex:1; min-width:0">
+              <label class="form-label fw-normal" style="font-size:0.88em">Color Mode</label>
+              <div class="btn-group btn-group-sm w-100" role="group" style="display:flex; flex-wrap:nowrap">
+                <input type="radio" class="btn-check color-mode-radio" name="mode-${originalCol}" id="mode-linear-${originalCol}" value="linear" ${mode === 'linear' ? 'checked' : ''} data-column="${originalCol}">
+                <label class="btn btn-outline-secondary text-nowrap" for="mode-linear-${originalCol}" style="flex:1">Linear Gradient</label>
+                <input type="radio" class="btn-check color-mode-radio" name="mode-${originalCol}" id="mode-heatmap-${originalCol}" value="heatmap" ${mode === 'heatmap' ? 'checked' : ''} data-column="${originalCol}">
+                <label class="btn btn-outline-secondary text-nowrap" for="mode-heatmap-${originalCol}" style="flex:1">Heatmap</label>
+              </div>
+            </div>
+            <div class="mode-linear-controls" style="display:${mode === 'linear' ? 'flex' : 'none'};flex-direction:row;gap:1rem;flex-shrink:0" data-column="${originalCol}">
+              <div style="text-align:center">
+                <label class="form-label fw-normal d-block" style="font-size:0.88em">Start Color</label>
+                <input type="color" class="form-control form-control-color" value="${colorStart}" data-column="${originalCol}" data-type="start" multiple autocomplete="off">
+              </div>
+              <div style="text-align:center">
+                <label class="form-label fw-normal d-block" style="font-size:0.88em">End Color</label>
+                <input type="color" class="form-control form-control-color" value="${colorEnd}" data-column="${originalCol}" data-type="end" multiple autocomplete="off">
+              </div>
+            </div>
+          </div>`;
+      }
+      gridContainer.appendChild(colDiv);
+    });
+  }
+
+  function renderPlots(plots, summary_stats) {
+    const edgeWeightPlot = plots['edge_weights'];
+    if (edgeWeightPlot) {
+      document.getElementById('plot-edge-weights').src = 'data:image/png;base64,' + edgeWeightPlot;
+    }
+
+    const row = document.getElementById('histone-plots-row');
+    row.innerHTML = '';
+
+    for (const [key, value] of Object.entries(plots)) {
+      if (key === 'edge_weights') continue;
+      
+      const col = document.createElement('div');
+      col.className = 'col-12';
+      let html = '<div class="text-left mt-1" style="font-size:1.2em; text-decoration: underline; font-weight: bold">' + key + '</div>'
+        + '<img class="plot-img" src="data:image/png;base64,' + value
+        + '" alt="' + key + '" title="' + key + '" style="max-height:420px" />';
+      if (summary_stats && summary_stats[key]) {
+        const s = summary_stats[key];
+        html += '<div class="text-left mt-2" style="font-size:1em; line-height:1.4;">'
+          + `Count: ${s.count} | Mean: ${fmt(s.mean)} | Std: ${fmt(s.std)}<br>`
+          + `Min: ${fmt(s.min)} | Q25: ${fmt(s.q25)} | Q50: ${fmt(s.q50)} | Q75: ${fmt(s.q75)} | Max: ${fmt(s.max)}`
+          + '</div>';
+      }
+      col.innerHTML = html;
+      row.appendChild(col);
+    }
+  }
+
+  document.getElementById('pct-slider').addEventListener('input', function() {
+    updatePctInfo(parseInt(this.value));
+    document.getElementById('pct-label').textContent = this.value;
+  });
+
+  function updatePctInfo(pct) {
+    if (!percentileTable.length) return;
+    const row = percentileTable.find(function(r) { return r.percentile === pct; })
+             || percentileTable[percentileTable.length - 1];
+    document.getElementById('pct-info').textContent =
+      `Weight threshold: ${row.threshold.toFixed(2)}  ·  Edges included: ${row.edge_count.toLocaleString()}`;
+  }
+
+  function renderGenomeSelector() {
+    const wrapper = document.getElementById('genome-selection-section');
+    const select = document.getElementById('genome-select');
+    const confirmation = document.getElementById('genome-selection-confirmation');
+    if (!wrapper || !select) return;
+    wrapper.style.display = 'block';
+    select.innerHTML = IGV_HOSTED_GENOMES.map(function(genome) {
+      return '<option value="' + genome.id + '">' + genome.label + '</option>';
+    }).join('');
+    select.value = selectedGenome;
+    confirmation.textContent = 'Selected genome: ' + IGV_HOSTED_GENOMES.find(g => g.id === selectedGenome).label;
+  }
+
+  function confirmGenomeSelection() {
+    const select = document.getElementById('genome-select');
+    const confirmation = document.getElementById('genome-selection-confirmation');
+    if (!select || !confirmation) return;
+    selectedGenome = select.value || 'hg38';
+    const genomeLabel = IGV_HOSTED_GENOMES.find(g => g.id === selectedGenome)?.label || selectedGenome;
+    confirmation.textContent = '✓ Genome selected successfully: ' + genomeLabel;
+    confirmation.style.color = '#059669';
+    document.getElementById('percentile-section').style.display = 'block';
+    
+    // Show solver section only for TSV+BED uploads or unsolved JSON (not for pre-solved JSON exports)
+    const solverSection = document.getElementById('solver-section');
+    if (solverSection) {
+      if (uploadWasTsvBed || !uploadWasPrecomputedJson) {
+        solverSection.style.display = 'block';
+      } else {
+        solverSection.style.display = 'none';
+      }
+    }
+  }
+
+  async function buildNetwork() {
+    if (!sessionToken) return;
+
+    const pct = parseInt(document.getElementById('pct-slider').value);
+    const maxDegree = parseInt(document.getElementById('max-degree-input').value);
+
+    // Read selected solver (default barnesHut if section is hidden)
+    const solverRadio = document.querySelector('input[name="solver"]:checked');
+    const solver = solverRadio ? solverRadio.value : 'barnesHut';
+
+    // Reuse the existing tab if it's still open; otherwise open (or reopen) one.
+    let targetTab;
+    if (networkTab && !networkTab.closed) {
+      targetTab = networkTab;
+      targetTab.document.open();
+      targetTab.document.write('<!doctype html><title>Building network...</title><body style="font-family:sans-serif;padding:16px">Rebuilding network, please wait…</body>');
+      targetTab.document.close();
+      targetTab.focus();
+    } else {
+      targetTab = window.open('about:blank', '_blank');
+      if (!targetTab) {
+        setStatus('Popup blocked. Please allow popups for this site and try again.', false, true);
+        return;
+      }
+      targetTab.document.write('<!doctype html><title>Building network...</title><body style="font-family:sans-serif;padding:16px">Building network, please wait…</body>');
+      networkTab = targetTab;
+    }
+
+    setBuildStatus(true);
+    setStatus('Building network…', true);
+
+    try {
+      const resp = await fetch('/build_network', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: sessionToken, top_pct: pct, max_degree: maxDegree, selected_genome: selectedGenome, solver: solver }),
+      });
+      const result = await resp.json();
+      if (result.error) {
+        targetTab.close();
+        if (networkTab === targetTab) networkTab = null;
+        setStatus('Error: ' + result.error, false, true);
+        setBuildStatus(false);
+        return;
+      }
+
+      targetTab.location.href = result.url;
+      setStatus('Network opened in a new tab.', false);
+    } catch (err) {
+      targetTab.close();
+      if (networkTab === targetTab) networkTab = null;
+      setStatus('Build failed: ' + err, false, true);
+    }
+    setBuildStatus(false);
+  }
+
+  document.getElementById('build-btn').addEventListener('click', buildNetwork);
+  document.getElementById('download-json-btn').addEventListener('click', downloadGraphJson);
+
+  let annotationDefaults = null;
+
+  function downloadGraphJson() {
+    if (!sessionToken) return;
+    const url = `/download_json/${encodeURIComponent(sessionToken)}`;
+    window.location.href = url;
+  }
+
+  function renderAnnotationConfig(detectedAnnotations, defaults) {
+    annotationDefaults = defaults;
+    
+    const checkboxesDiv = document.getElementById('annotations-checkboxes');
+    checkboxesDiv.innerHTML = '';
+    
+    const maxAnnotations = 7;
+    detectedAnnotations.slice(0, maxAnnotations).forEach(function(col, idx) {
+      const col_div = document.createElement('div');
+      col_div.className = 'col-md-6 col-lg-4';
+      const id = 'annot-check-' + col;
+      col_div.innerHTML = `<div class="form-check">
+        <input class="form-check-input annotation-checkbox" type="checkbox" id="${id}" data-column="${col}" checked>
+        <label class="form-check-label" for="${id}">${col}</label>
+      </div>`;
+      checkboxesDiv.appendChild(col_div);
+    });
+    
+    const nodeSizingSelect = document.getElementById('node-sizing-column');
+    nodeSizingSelect.innerHTML = '<option value="">Default (size=12)</option>';
+    detectedAnnotations
+      .filter(function(col) {
+        const cfg = annotationDefaults.annotations[col] || {};
+        return cfg.color_mode !== 'categorical';
+      })
+      .forEach(function(col) {
+        const opt = document.createElement('option');
+        opt.value = col;
+        opt.textContent = col;
+        if (defaults.node_sizing_column === col) opt.selected = true;
+        nodeSizingSelect.appendChild(opt);
+      });
+    
+    updateAnnotationDisplayModes();
+    
+    document.querySelectorAll('.annotation-checkbox').forEach(function(cb) {
+      cb.addEventListener('change', updateAnnotationDisplayModes);
+    });
+  }
+
+  function updateAnnotationDisplayModes() {
+    const selected = Array.from(document.querySelectorAll('.annotation-checkbox:checked'))
+      .map(cb => cb.dataset.column);
+    
+    const modesDiv = document.getElementById('annotation-display-modes');
+    modesDiv.innerHTML = '';
+    
+    if (selected.length === 0) {
+      modesDiv.innerHTML = '<p class="text-muted" style="font-size:0.88em">Select annotations above to configure display modes.</p>';
+      return;
+    }
+    
+    modesDiv.innerHTML = '<div class="section-heading mt-3 mb-3">Display Modes</div>';
+    
+    const gridContainer = document.createElement('div');
+    gridContainer.style.display = 'flex';
+    gridContainer.style.flexDirection = 'column';
+    gridContainer.style.gap = '1rem';
+    modesDiv.appendChild(gridContainer);
+    
+    selected.forEach(function(col) {
+      const config = annotationDefaults.annotations[col] || {};
+      const mode = config.color_mode || 'linear';
+      const colorStart = config.color_start || '#f7fbff';
+      const colorEnd = config.color_end || '#08306b';
+      const colorA = config.color_A || '#ff8c00';
+      const colorB = config.color_B || '#9b30ff';
+      const cfg = annotationDefaults.annotations[col];
+      const isCompartment = cfg && cfg.color_mode === 'categorical';
+      
+      const colDiv = document.createElement('div');
+      colDiv.className = 'p-2 border rounded';
+      if (isCompartment) {
+        colDiv.innerHTML = `
+          <div class="fw-semibold mb-2" style="font-size:0.95em">${col} <span class="badge bg-secondary" style="font-size:0.75em">categorical A/B</span></div>
+          <div style="display:flex; flex-direction:row; gap:0.75rem">
+            <div>
+              <label class="form-label fw-normal" style="font-size:0.88em">Compartment A Color</label>
+              <input type="color" class="form-control form-control-color" value="${colorA}" data-column="${col}" data-type="color_A">
+            </div>
+            <div>
+              <label class="form-label fw-normal" style="font-size:0.88em">Compartment B Color</label>
+              <input type="color" class="form-control form-control-color" value="${colorB}" data-column="${col}" data-type="color_B">
+            </div>
+          </div>`;
+      } else {
+        colDiv.innerHTML = `
+          <div class="fw-semibold mb-2" style="font-size:0.95em">${col}</div>
+          <div style="display:flex; align-items:flex-start; gap:1rem">
+            <div style="flex:1; min-width:0">
+              <label class="form-label fw-normal" style="font-size:0.88em">Color Mode</label>
+              <div class="btn-group btn-group-sm w-100" role="group" style="display:flex; flex-wrap:nowrap">
+                <input type="radio" class="btn-check color-mode-radio" name="mode-${col}" id="mode-linear-${col}" value="linear" ${mode === 'linear' ? 'checked' : ''} data-column="${col}">
+                <label class="btn btn-outline-secondary text-nowrap" for="mode-linear-${col}" style="flex:1">Linear Gradient</label>
+                <input type="radio" class="btn-check color-mode-radio" name="mode-${col}" id="mode-heatmap-${col}" value="heatmap" ${mode === 'heatmap' ? 'checked' : ''} data-column="${col}">
+                <label class="btn btn-outline-secondary text-nowrap" for="mode-heatmap-${col}" style="flex:1">Heatmap</label>
+              </div>
+            </div>
+            <div class="mode-linear-controls" style="display:${mode === 'linear' ? 'flex' : 'none'};flex-direction:row;gap:1rem;flex-shrink:0" data-column="${col}">
+              <div style="text-align:center">
+                <label class="form-label fw-normal d-block" style="font-size:0.88em">Start Color</label>
+                <input type="color" class="form-control form-control-color" value="${colorStart}" data-column="${col}" data-type="start">
+              </div>
+              <div style="text-align:center">
+                <label class="form-label fw-normal d-block" style="font-size:0.88em">End Color</label>
+                <input type="color" class="form-control form-control-color" value="${colorEnd}" data-column="${col}" data-type="end">
+              </div>
+            </div>
+          </div>`;
+      }
+      gridContainer.appendChild(colDiv);
+    });
+
+    document.querySelectorAll('.color-mode-radio').forEach(function(radio) {
+      radio.addEventListener('change', function() {
+        const col = this.dataset.column;
+        const mode = this.value;
+        const controls = document.querySelector(`.mode-linear-controls[data-column="${col}"]`);
+        if (controls) {
+          controls.style.display = mode === 'linear' ? 'flex' : 'none';
+        }
+      });
+    });
+  }
+
+  document.getElementById('configure-annotations-btn').addEventListener('click', async function() {
+    if (!sessionToken) return;
+    
+    const selected = Array.from(document.querySelectorAll('.annotation-checkbox:checked'))
+      .map(cb => cb.dataset.column);
+    
+    const nodeSizingCol = document.getElementById('node-sizing-column').value || null;
+    
+    if (nodeSizingCol && annotationDefaults.annotations[nodeSizingCol] && annotationDefaults.annotations[nodeSizingCol].color_mode === 'categorical') {
+      setStatus('Compartment annotations are categorical and cannot be used for node sizing.', false, true);
+      return;
+    }
+
+    if (selected.length === 0 && !nodeSizingCol) {
+      setStatus('Please select at least one annotation column for display or node sizing.', false, true);
+      return;
+    }
+    
+    const annotationsConfig = {};
+    
+    selected.forEach(function(col) {
+      const cfg = annotationDefaults.annotations[col] || {};
+      if (cfg.color_mode === 'categorical') {
+        const pickerA = document.querySelector(`input[type="color"][data-column="${col}"][data-type="color_A"]`);
+        const pickerB = document.querySelector(`input[type="color"][data-column="${col}"][data-type="color_B"]`);
+        annotationsConfig[col] = {
+          color_mode: 'categorical',
+          color_A: pickerA ? pickerA.value : (cfg.color_A || '#ff8c00'),
+          color_B: pickerB ? pickerB.value : (cfg.color_B || '#9b30ff'),
+        };
+      } else {
+        const modeLinear = document.getElementById(`mode-linear-${col}`);
+        const mode = modeLinear && modeLinear.checked ? 'linear' : 'heatmap';
+        const colorStart = document.querySelector(`input[type="color"][data-column="${col}"][data-type="start"]`);
+        const colorEnd = document.querySelector(`input[type="color"][data-column="${col}"][data-type="end"]`);
+        annotationsConfig[col] = {
+          color_mode: mode,
+          color_start: colorStart ? colorStart.value : '#f7fbff',
+          color_end: colorEnd ? colorEnd.value : '#08306b',
+        };
+      }
+    });
+    
+    if (nodeSizingCol && !selected.includes(nodeSizingCol)) {
+      const cfg = annotationDefaults.annotations[nodeSizingCol] || {};
+      if (cfg.color_mode === 'categorical') {
+        annotationsConfig[nodeSizingCol] = {
+          color_mode: 'categorical',
+          color_A: cfg.color_A || '#ff8c00',
+          color_B: cfg.color_B || '#9b30ff',
+        };
+      } else {
+        annotationsConfig[nodeSizingCol] = {
+          color_mode: cfg.color_mode || 'linear',
+          color_start: cfg.color_start || '#f7fbff',
+          color_end: cfg.color_end || '#08306b',
+        };
+      }
+    }
+    
+    const payload = {
+      token: sessionToken,
+      selected_columns: selected,
+      annotations: annotationsConfig,
+      node_sizing_column: nodeSizingCol,
+    };
+    
+    const configBtn = document.getElementById('configure-annotations-btn');
+    const configStatus = document.getElementById('config-status-msg');
+    configBtn.disabled = true;
+    document.getElementById('config-spinner').classList.remove('d-none');
+    configStatus.textContent = 'Saving…';
+    configStatus.style.color = '#555';
+
+    try {
+      const resp = await fetch('/configure_annotations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const result = await resp.json();
+      if (result.error) {
+        configStatus.style.color = '#dc3545';
+        configStatus.textContent = '✗ Error: ' + result.error;
+      } else {
+        configStatus.style.color = 'green';
+        configStatus.textContent = '✓ Configuration saved';
+        renderGenomeSelector();
+        setTimeout(() => { configStatus.textContent = ''; }, 3000);
+      }
+    } catch (err) {
+      configStatus.style.color = '#dc3545';
+      configStatus.textContent = '✗ Save failed: ' + err;
+    }
+
+    configBtn.disabled = false;
+    document.getElementById('config-spinner').classList.add('d-none');
+  });
+
+  function setStatus(msg, spinner, isError) {
+    const bar = document.getElementById('status-bar');
+    bar.textContent = msg;
+    bar.className = isError ? 'text-danger' : 'text-muted';
+  }
+
+  function toggleUploadBtn(disabled) {
+    document.getElementById('upload-btn').disabled = disabled;
+    document.getElementById('clear-upload-btn').disabled = disabled;
+    document.getElementById('upload-spinner').classList.toggle('d-none', !disabled);
+  }
+
+  function disableAllProcessingButtons(disabled) {
+    // Disable chromosome selection buttons during processing
+    const applyBtn = document.getElementById('apply-chromosomes-btn');
+    const skipBtn = document.getElementById('skip-chromosomes-btn');
+    const loadBtn = document.getElementById('upload-btn');
+    const clrBtn = document.getElementById('clear-upload-btn');
+    if (applyBtn) {applyBtn.disabled = disabled;
+      loadBtn.disabled = disabled;
+     clrBtn.disabled = disabled;}
+    if (skipBtn) {skipBtn.disabled = disabled;
+      loadBtn.disabled = disabled;
+      clrBtn.disabled = disabled;}
+
+  }
+
+  function showDataAndNextSteps(result) {
+    // Display plots and annotation sections
+    if (result.plots) renderPlots(result.plots, result.annotation_stats);
+    if (result.detected_annotations && result.detected_annotations.length > 0) {
+      renderAnnotationConfig(result.detected_annotations, result.annotation_defaults);
+      document.getElementById('annotation-config-section').style.display = 'block';
+    }
+    document.getElementById('plots-section').style.display = 'block';
+    // Show genome selector if we're past annotation config
+    if (document.getElementById('annotation-config-section').style.display === 'none') {
+      renderGenomeSelector();
+    }
+  }
+
+  function setBuildStatus(running) {
+    document.getElementById('build-btn').disabled = running;
+    document.getElementById('build-spinner').classList.toggle('d-none', !running);
+  }
+</script>
+</body>
+</html>

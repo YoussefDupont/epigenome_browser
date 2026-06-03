@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>3D Graph View</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous" />
+  <style>
+    body, html { 
+      height: 100%; 
+      margin: 0; 
+      background: #121b26; 
+      color: #fff; 
+    }
+    #graph-layout { 
+      display: flex; 
+      height: calc(100% - 72px); 
+      overflow: hidden; 
+    }
+    #graph-area { 
+      flex: 1; 
+      display: flex; 
+      flex-direction: column; 
+      position: relative; 
+      overflow: hidden; 
+    }
+    #graph-container { 
+      flex: 1; 
+      min-height: 0; 
+    }
+    .legend-panel { 
+      position: absolute; 
+      top: 140px;
+      right: 16px; 
+      max-height: calc(100% - 150px); 
+      overflow: auto; 
+      border: 1px solid rgba(255,255,255,0.14); 
+      border-radius: 14px; 
+      backdrop-filter: blur(10px);
+      width: 280px; 
+      min-width: 240px; 
+      padding: 1rem; 
+      background: rgba(255,255,255,0.05); 
+      border-left: 1px solid rgba(255,255,255,0.08); 
+    }
+    .legend-panel strong { 
+      display: block; 
+      margin-bottom: 0.5rem; 
+      font-size: 0.95rem; 
+    }
+    .legend-item { 
+      display: flex; 
+      align-items: center; 
+      gap: 0.45rem; 
+      padding: 0.3rem 0.45rem; 
+      border-radius: 0.45rem; 
+      background: rgba(255,255,255,0.06); 
+      border: 1px solid rgba(255,255,255,0.08); 
+      font-size: 0.5rem; 
+    }
+    .legend-item span:first-child { 
+      width: 12px; 
+      height: 12px; 
+      border-radius: 4px; 
+      display: inline-block; 
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.15); 
+    }
+    .legend-item span.name { 
+      flex: 1; 
+      color: #f8fafc; 
+      overflow: hidden; 
+      text-overflow: ellipsis; 
+      white-space: nowrap;
+    }
+    .legend-item span.count { 
+      color: #cbd5e1; 
+      font-size: 0.78rem; 
+      margin-left: auto; 
+    }
+    .toolbar { 
+      height: 72px; 
+      padding: 0.75rem 1rem; 
+      display: flex; 
+      align-items: center; 
+      justify-content: space-between; 
+      gap: 1rem; 
+      background: rgba(255,255,255,0.06); 
+      border-bottom: 1px solid rgba(255,255,255,0.08); 
+    }
+    .toolbar h5 { 
+      margin: 0; 
+      font-size: 1.05rem; 
+    }
+    .toolbar .toolbar-actions a { 
+      margin-left: 0.5rem; 
+    }
+    .toolbar small { 
+      display: block; 
+      color: #d1d5db; 
+    }
+    .legend-panel strong { 
+      display: block; 
+      margin-bottom: 0.75rem; 
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <div>
+      <h5>3D Exported Graph View</h5>
+      <small>Using solved node positions from the uploaded exported JSON.</small>
+    </div>
+    <div class="toolbar-actions">
+      <a href="/" class="btn btn-sm btn-light">Back to uploader</a>
+    </div>
+  </div>
+  <div id="graph-layout">
+    <div id="graph-area">
+      <div class="toolbar-controls" style="padding:0.5rem 1rem 0.75rem; display:flex; flex-direction:column; gap:0.5rem; background: rgba(255,255,255,0.04); border-bottom:1px solid rgba(255,255,255,0.08);">
+
+        <div>
+          <label for="node-slider" style="display:block; font-size:0.85rem; color:#d1d5db; margin-bottom:0.35rem;">Navigate nodes</label>
+          <input id="node-slider" type="range" min="0" max="0" value="0" step="1" style="width:100%;" disabled />
+        </div>
+
+        <div style="display:flex; align-items:center; gap:1rem;">
+          <div style="flex-shrink:0;">
+            <select id="chromosome-selector" class="form-select form-select-sm" disabled style="width:180px; background:#1f2937; color:#f8fafc; border:1px solid rgba(255,255,255,0.14);"></select>
+          </div>
+          <div id="current-node-label" style="flex:1; font-size:0.85rem; color:#d1d5db; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">No nodes loaded</div>
+          <div style="display:flex; gap:0.5rem; align-items:center; flex-shrink:0;">
+            <button class="btn btn-sm btn-outline-light" id="slow-down-btn" type="button" disabled aria-label="Slow down autoplay">&#9194;</button>
+            <button class="btn btn-sm btn-outline-light" id="prev-node-btn" type="button" disabled aria-label="Previous node">&#9198;</button>
+            <button class="btn btn-sm btn-outline-light" id="play-node-btn" type="button" disabled aria-label="Play or pause autoplay">&#9654;</button>
+            <button class="btn btn-sm btn-outline-light" id="next-node-btn" type="button" disabled aria-label="Next node">&#9197;</button>
+            <button class="btn btn-sm btn-outline-light" id="fast-forward-btn" type="button" disabled aria-label="Speed up autoplay">&#9193;</button>
+            <span id="autoplay-speed-display" style="color:#d1d5db; font-size:0.8rem; margin-left:0.25rem; white-space:nowrap;">1.0x</span>
+          </div>
+        </div>
+
+      </div>
+      <div id="graph-container"></div>
+      <div class="legend-panel">
+        <strong>Legend</strong>
+        <div id="graph-legend"></div>
+      </div>
+    </div>
+  
+    <script src="https://unpkg.com/three@0.139.2/build/three.min.js"></script>
+    <script src="https://unpkg.com/three@0.139.2/examples/js/math/ConvexHull.js"></script>
+    <script src="https://unpkg.com/three@0.139.2/examples/js/geometries/ConvexGeometry.js"></script>
+    <script src="https://unpkg.com/3d-force-graph@1.70.18/dist/3d-force-graph.min.js"></script>
+    <script>
+      const token = "{{ token }}";
+      const container = document.getElementById('graph-container');
+
+      // Track last hull rebuild time to throttle per-tick updates.
+      let _lastHullRebuildTime = 0;
+      const HULL_THROTTLE_MS = 100;
+
+      function getGraphNodeId(nodeOrId) {
+        if (nodeOrId && typeof nodeOrId === 'object') {
+          return String(nodeOrId.id ?? nodeOrId.label ?? nodeOrId.name ?? '');
+        }
+        return String(nodeOrId ?? '');
+      }
+
+      function isLinkInsideHighlightedHull(link) {
+        if (highlightedTADNodeIds.size === 0) return true;
+        const sourceId = getGraphNodeId(link.source);
+        const targetId = getGraphNodeId(link.target);
+        return highlightedTADNodeIds.has(sourceId) && highlightedTADNodeIds.has(targetId);
+      }
+
+      function getLinkOpacity(link) {
+        return isLinkInsideHighlightedHull(link) ? 0.45 : 0.08;
+      }
+
+      const Graph = ForceGraph3D()(container)
+        .nodeLabel(node => node.id)
+        .nodeColor(node => node.color || '#888888')
+        .linkMaterial(link => new THREE.LineBasicMaterial({
+          color: 0xffffff,
+          transparent: true,
+          opacity: getLinkOpacity(link),
+          depthWrite: false,
+        }))
+        .linkWidth(0.8)
+        .nodeRelSize(4)
+        .nodeThreeObjectExtend(true)
+        .nodeThreeObject(node => {
+          if (!highlightedTADNodeIds.has(node.id)) return null;
+
+          const group = new THREE.Group();
+
+          // Outer glow shell
+          const glowGeo = new THREE.SphereGeometry(9, 16, 16);
+          const glowMat = new THREE.MeshBasicMaterial({
+            color: 0x808080, transparent: true, opacity: 1.0, depthWrite: false,
+          });
+          group.add(new THREE.Mesh(glowGeo, glowMat));
+
+          // Text label sprite
+          const canvas = document.createElement('canvas');
+          canvas.width = 512;
+          canvas.height = 80;
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = 'rgba(0,0,0,0.65)';
+          ctx.beginPath();
+          ctx.roundRect(4, 4, canvas.width - 8, canvas.height - 8, 10);
+          ctx.fill();
+          ctx.font = 'bold 28px sans-serif';
+          ctx.fillStyle = '#ffffff';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(node.id, canvas.width / 2, canvas.height / 2);
+
+          const texture = new THREE.CanvasTexture(canvas);
+          const spriteMat = new THREE.SpriteMaterial({ map: texture, depthWrite: false });
+          const sprite = new THREE.Sprite(spriteMat);
+          sprite.scale.set(60, 10, 1);
+          sprite.position.set(0, 14, 0);
+          group.add(sprite);
+
+          return group;
+        })
+        .onEngineTick(() => {
+          // Only rebuild the convex hull when nodes are highlighted AND
+          // enough time has elapsed since the last rebuild.
+          if (highlightedTADNodes.length === 0) return;
+          const now = performance.now();
+          if (now - _lastHullRebuildTime < HULL_THROTTLE_MS) return;
+          _lastHullRebuildTime = now;
+
+          const nodesInTad = highlightedTADNodes.map(nodeId =>
+            graphNodes.find(n => n.id === nodeId)
+          ).filter(n => n);
+
+          if (currentConvexHull) {
+            Graph.scene().remove(currentConvexHull);
+            currentConvexHull = null;
+          }
+
+          const hull = createConvexHullMesh(nodesInTad);
+          if (hull) {
+            Graph.scene().add(hull);
+            currentConvexHull = hull;
+          }
+        });
+
+      let rawGraphNodes = [];
+      // rawGraphLinks stores plain {source: string, target: string} objects.
+      // It is NEVER passed directly to Graph.graphData() — we always pass a
+      // fresh copy — so 3d-force-graph cannot mutate source/target into object
+      // references and break the allowedIds.has() checks in getGraphSubset().
+      let rawGraphLinks = [];
+      let rawChromosomes = [];
+      let graphNodes = [];
+      let graphLinks = [];
+      let selectedChromosome = 'all';
+      let allTADs = [];
+      let currentTADIndex = 0;
+      let sliderAutoPlay = false;
+      let sliderTimer = null;
+      let autoPlaySpeed = 1.0;
+      const speedSteps = [0.25, 0.5, 1.0, 2.0, 4.0];
+      let highlightedNode = null;
+      let highlightedTADNodes = [];
+      let highlightedTADNodeIds = new Set();
+      let nodeOriginalColors = {};
+      let currentConvexHull = null;
+      let convexHullUpdateNeeded = false;
+      const neonGreen = '#00FF41';
+
+      function updateNodeControls() {
+        const hasTADs = allTADs.length > 0;
+        const slider = document.getElementById('node-slider');
+        const selector = document.getElementById('chromosome-selector');
+        const prevBtn = document.getElementById('prev-node-btn');
+        const nextBtn = document.getElementById('next-node-btn');
+        const playBtn = document.getElementById('play-node-btn');
+
+        slider.disabled = !hasTADs;
+        selector.disabled = !hasTADs || rawChromosomes.length <= 1;
+        prevBtn.disabled = !hasTADs || currentTADIndex <= 0;
+        nextBtn.disabled = !hasTADs || currentTADIndex >= allTADs.length - 1;
+        playBtn.disabled = !hasTADs;
+        document.getElementById('slow-down-btn').disabled = !hasTADs;
+        document.getElementById('fast-forward-btn').disabled = !hasTADs;
+        if (hasTADs) {
+          slider.max = String(allTADs.length - 1);
+        } else {
+          slider.max = '0';
+        }
+      }
+
+      function formatNodeLabel(tadName, nodeCount) {
+        if (!tadName) return 'No TADs loaded';
+        return `TAD ${currentTADIndex + 1} / ${allTADs.length}: ${tadName} (${nodeCount} node${nodeCount === 1 ? '' : 's'})`;
+      }
+
+      function getNodesInTAD(tadName) {
+        return graphNodes.filter(node => {
+          const nodeTad = node.parent == null || String(node.parent).trim() === '' ? 'unassigned' : String(node.parent);
+          return nodeTad === tadName;
+        });
+      }
+
+      function calculateBounds(nodes) {
+        if (!nodes.length) return null;
+        let minX = Infinity, maxX = -Infinity;
+        let minY = Infinity, maxY = -Infinity;
+        let minZ = Infinity, maxZ = -Infinity;
+        nodes.forEach(node => {
+          minX = Math.min(minX, Number(node.x) || 0);
+          maxX = Math.max(maxX, Number(node.x) || 0);
+          minY = Math.min(minY, Number(node.y) || 0);
+          maxY = Math.max(maxY, Number(node.y) || 0);
+          minZ = Math.min(minZ, Number(node.z) || 0);
+          maxZ = Math.max(maxZ, Number(node.z) || 0);
+        });
+        const centerX = (minX + maxX) / 2;
+        const centerY = (minY + maxY) / 2;
+        const centerZ = (minZ + maxZ) / 2;
+        const radius = Math.max(
+          (maxX - minX) / 2,
+          (maxY - minY) / 2,
+          (maxZ - minZ) / 2
+        ) + 50;
+        return { centerX, centerY, centerZ, radius, minX, maxX, minY, maxY, minZ, maxZ };
+      }
+
+      function createConvexHullMesh(nodes) {
+        if (!nodes.length) return null;
+        
+        const positions = nodes.map(node => 
+          new THREE.Vector3(Number(node.x) || 0, Number(node.y) || 0, Number(node.z) || 0)
+        );
+        
+        const uniquePositions = [];
+        const positionSet = new Set();
+        positions.forEach(pos => {
+          const key = `${pos.x.toFixed(2)},${pos.y.toFixed(2)},${pos.z.toFixed(2)}`;
+          if (!positionSet.has(key)) {
+            positionSet.add(key);
+            uniquePositions.push(pos);
+          }
+        });
+        
+        if (uniquePositions.length < 4) {
+          return null;
+        }
+        
+        try {
+          const geometry = new THREE.ConvexGeometry(uniquePositions);
+          const edgesGeometry = new THREE.EdgesGeometry(geometry);
+          const wireframeMaterial = new THREE.LineBasicMaterial({
+            color: 0x00FFFF,
+            transparent: false,
+            opacity: 1.0,
+            linewidth: 5,
+            fog: false,
+            depthWrite: false,
+            depthTest: false
+          });
+          const wireframe = new THREE.LineSegments(edgesGeometry, wireframeMaterial);
+          return wireframe;
+        } catch (e) {
+          console.warn('Failed to compute convex hull:', e);
+          return null;
+        }
+      }
+
+      function updateConvexHull(tadName) {
+        if (currentConvexHull) {
+          Graph.scene().remove(currentConvexHull);
+          currentConvexHull = null;
+        }
+        const nodesInTad = getNodesInTAD(tadName);
+        if (nodesInTad.length === 0) return;
+        const hull = createConvexHullMesh(nodesInTad);
+        if (hull) {
+          Graph.scene().add(hull);
+          currentConvexHull = hull;
+        }
+      }
+
+      function moveCameraToTAD(tadName) {
+        const nodesInTad = getNodesInTAD(tadName);
+        if (!nodesInTad.length) return;
+        const bounds = calculateBounds(nodesInTad);
+        if (!bounds) return;
+        const { centerX, centerY, centerZ, minX, maxX, minY, maxY, minZ, maxZ } = bounds;
+        const sizeX = maxX - minX;
+        const sizeY = maxY - minY;
+        const sizeZ = maxZ - minZ;
+        const maxSize = Math.max(sizeX, sizeY, sizeZ);
+        const distance = maxSize / (2 * Math.tan(Math.PI / 180 * 37.5)) * 1.5;
+        Graph.cameraPosition(
+          { x: centerX + distance * 0.7, y: centerY + distance * 0.5, z: centerZ + distance * 0.7 },
+          { x: centerX, y: centerY, z: centerZ },
+          800
+        );
+        highlightNodesInTAD(tadName);
+      }
+
+      function highlightNodesInTAD(tadName) {
+        const nodesInTad = getNodesInTAD(tadName);
+        
+        highlightedTADNodes.forEach(nodeId => {
+          const node = graphNodes.find(n => n.id === nodeId);
+          if (node) {
+            node.color = nodeOriginalColors[nodeId] || '#8aa1b0';
+          }
+        });
+
+        Graph.refresh();  // forces 3d-force-graph to re-evaluate all link materials
+        
+        highlightedTADNodes = [];
+        highlightedTADNodeIds = new Set();
+        nodeOriginalColors = {};
+        nodesInTad.forEach(node => {
+          highlightedTADNodes.push(node.id);
+          highlightedTADNodeIds.add(node.id);
+          nodeOriginalColors[node.id] = node.color;
+          node.color = neonGreen;
+        });
+        
+        updateConvexHull(tadName);
+        highlightedNode = nodesInTad.length > 0 ? nodesInTad[0] : null;
+        Graph.graphData({ nodes: graphNodes, links: graphLinks });
+      }
+
+      function setCurrentTAD(index, animate = true) {
+        if (!allTADs.length) return;
+        currentTADIndex = Math.max(0, Math.min(index, allTADs.length - 1));
+        const tad = allTADs[currentTADIndex];
+        const nodesInTad = getNodesInTAD(tad);
+        document.getElementById('node-slider').value = String(currentTADIndex);
+        document.getElementById('current-node-label').textContent = formatNodeLabel(tad, nodesInTad.length);
+        updateNodeControls();
+        if (animate) {
+          moveCameraToTAD(tad);
+        }
+      }
+
+      function getGraphSubset(chrom) {
+        if (!chrom || chrom === 'all') {
+          // Pass fresh copies so 3d-force-graph object-mutation stays isolated.
+          const nodes = rawGraphNodes.map(n => ({...n}));
+          const links = rawGraphLinks.map(l => ({ source: l.source, target: l.target }));
+          return { nodes, links };
+        }
+        const allowedIds = new Set(
+          rawGraphNodes
+            .filter(n => String(n.chrom || '').trim() === String(chrom).trim())
+            .map(n => n.id)
+        );
+        const nodes = rawGraphNodes.filter(n => allowedIds.has(n.id)).map(n => ({...n}));
+        // Read source/target as strings from rawGraphLinks (never mutated).
+        const links = rawGraphLinks
+          .filter(l => allowedIds.has(l.source) && allowedIds.has(l.target))
+          .map(l => ({ source: l.source, target: l.target }));
+        return { nodes, links };
+      }
+
+      function setChromosomeFilter(chrom) {
+        selectedChromosome = chrom || 'all';
+        const subset = getGraphSubset(selectedChromosome);
+        graphNodes = subset.nodes;
+        graphLinks = subset.links;
+        // Pass copies to Graph so the force engine cannot mutate rawGraphLinks.
+        Graph.graphData({ nodes: graphNodes.slice(), links: graphLinks.slice() });
+        const tadSet = new Set();
+        graphNodes.forEach(node => {
+          const tad = node.parent == null || String(node.parent).trim() === '' ? 'unassigned' : String(node.parent);
+          tadSet.add(tad);
+        });
+        allTADs = Array.from(tadSet).sort((a, b) => {
+          if (a === 'unassigned') return 1;
+          if (b === 'unassigned') return -1;
+          return a.localeCompare(b);
+        });
+        updateLegend(graphNodes);
+        setCurrentTAD(0, false);
+        updateNodeControls();
+      }
+
+      function stopAutoPlay() {
+        sliderAutoPlay = false;
+        document.getElementById('play-node-btn').textContent = '\u25b6';
+        if (sliderTimer) {
+          clearInterval(sliderTimer);
+          sliderTimer = null;
+        }
+      }
+
+      function toggleAutoPlay() {
+        sliderAutoPlay = !sliderAutoPlay;
+        const playBtn = document.getElementById('play-node-btn');
+        playBtn.innerHTML = sliderAutoPlay ? '\u23f8' : '\u25b6';
+        if (!sliderAutoPlay) {
+          stopAutoPlay();
+          return;
+        }
+        function scheduleNext() {
+          if (sliderTimer) clearTimeout(sliderTimer);
+          sliderTimer = setTimeout(() => {
+            if (!sliderAutoPlay) return;
+            if (currentTADIndex >= allTADs.length - 1) {
+              stopAutoPlay();
+              return;
+            }
+            setCurrentTAD(currentTADIndex + 1);
+            scheduleNext();
+          }, 1400 / autoPlaySpeed);
+        }
+        scheduleNext();
+      }
+
+      function setAutoPlaySpeed(delta) {
+        const idx = speedSteps.indexOf(autoPlaySpeed);
+        const newIdx = Math.max(0, Math.min(speedSteps.length - 1, idx + delta));
+        autoPlaySpeed = speedSteps[newIdx];
+        document.getElementById('autoplay-speed-display').textContent = autoPlaySpeed + 'x';
+        if (sliderAutoPlay) {
+          if (sliderTimer) clearTimeout(sliderTimer);
+          toggleAutoPlay();
+          toggleAutoPlay();
+        }
+      }
+
+      function updateLegend(nodes) {
+        const legend = document.getElementById('graph-legend');
+        legend.innerHTML = '';
+        const parentMap = new Map();
+        nodes.forEach(node => {
+          const parentRaw = node.parent;
+          const parent = parentRaw == null || String(parentRaw).trim() === '' ? 'unassigned' : String(parentRaw);
+          const color = node.color || '#888888';
+          if (!parentMap.has(parent)) {
+            parentMap.set(parent, { count: 0, color });
+          }
+          const entry = parentMap.get(parent);
+          entry.count += 1;
+        });
+        if (!parentMap.size) {
+          legend.textContent = 'No parent metadata available.';
+          return;
+        }
+        const sortedEntries = Array.from(parentMap.entries()).sort(([a], [b]) => {
+          if (a === 'unassigned') return 1;
+          if (b === 'unassigned') return -1;
+          return a.localeCompare(b);
+        });
+        const ul = document.createElement('ul');
+        ul.style.listStyle = 'none';
+        ul.style.padding = '0';
+        ul.style.margin = '0';
+        sortedEntries.forEach(([parent, entry]) => {
+          const li = document.createElement('li');
+          li.style.marginBottom = '0.1rem';
+          li.innerHTML = `<span style="background:${entry.color}; width:12px; height:12px; border-radius:4px; display:inline-block; box-shadow:0 0 0 1px rgba(255,255,255,0.15); margin-right:0.45rem;"></span><span style="color:#f8fafc; font-size:0.8rem;">${parent}</span> <span style="color:#cbd5e1; font-size:0.7rem;">(${entry.count} node${entry.count === 1 ? '' : 's'})</span>`;
+          ul.appendChild(li);
+        });
+        legend.appendChild(ul);
+      }
+
+      document.addEventListener('DOMContentLoaded', () => {
+        document.getElementById('node-slider').addEventListener('input', event => {
+          stopAutoPlay();
+          setCurrentTAD(Number(event.target.value));
+        });
+        document.getElementById('prev-node-btn').addEventListener('click', () => {
+          stopAutoPlay();
+          setCurrentTAD(currentTADIndex - 1);
+        });
+        document.getElementById('next-node-btn').addEventListener('click', () => {
+          stopAutoPlay();
+          setCurrentTAD(currentTADIndex + 1);
+        });
+        document.getElementById('play-node-btn').addEventListener('click', () => {
+          toggleAutoPlay();
+        });
+        document.getElementById('slow-down-btn').addEventListener('click', () => {
+          setAutoPlaySpeed(-1);
+        });
+        document.getElementById('fast-forward-btn').addEventListener('click', () => {
+          setAutoPlaySpeed(+1);
+        });
+        document.getElementById('chromosome-selector').addEventListener('change', event => {
+          stopAutoPlay();
+          setChromosomeFilter(event.target.value);
+          setCurrentTAD(0, true);
+        });
+      });
+
+      function loadGraph() {
+        fetch(`/graphjson/${token}`)
+          .then(response => {
+            if (!response.ok) throw new Error('Unable to load graph data.');
+            return response.json();
+          })
+          .then(data => {
+            const nodes = (data.nodes || []).map(raw => {
+              // raw is {data: {...metadata, x, y}} after store_positions merge.
+              // Fall back to flat raw for direct JSON uploads.
+              const details = raw && raw.data && typeof raw.data === 'object' ? raw.data : raw;
+
+              // Resolve x/y: prefer stamped position inside .data (set by
+              // store_positions), then top-level raw, then 0.
+              const resolvedX = details.x ?? raw.x ?? 0;
+              const resolvedY = details.y ?? raw.y ?? 0;
+              const fallbackScale = Math.max(100, Math.max(Math.abs(resolvedX), Math.abs(resolvedY)) * 8);
+              const resolvedZ = details.z ?? raw.z ?? (Math.random() - 0.5) * fallbackScale;
+
+              return {
+                id: String(details.id ?? details.label ?? details.name ?? raw.id ?? ''),
+                parent: details.parent ?? raw.parent ?? details.group ?? raw.group ?? null,
+                x: resolvedX,
+                y: resolvedY,
+                z: resolvedZ,
+                // Pin nodes to their solved x/y so 3d-force-graph does not
+                // re-run physics and collapse the layout. z is left free so
+                // the simulation can spread nodes into the third dimension.
+                fx: resolvedX,
+                fy: resolvedY,
+                color: details.baseColour || details.color || '#8aa1b0',
+                chrom: details.chrom || details.chr || details.chromosome || '',
+              };
+            }).filter(node => node.id);
+
+            const links = (data.edges || []).map(raw => ({
+              source: String(raw.source ?? raw.data?.source ?? raw.data?.from ?? raw.from ?? ''),
+              target: String(raw.target ?? raw.data?.target ?? raw.data?.to ?? raw.to ?? ''),
+            })).filter(link => link.source && link.target);
+
+            rawGraphNodes = nodes;
+            rawGraphLinks = links;  // plain string-ID objects; never mutated
+            rawChromosomes = Array.isArray(data.chromosomes) ? data.chromosomes.map(String).filter(Boolean) : [];
+            if (!rawChromosomes.length) {
+              rawChromosomes = Array.from(new Set(rawGraphNodes.map(n => String(n.chrom || '').trim()).filter(Boolean)));
+            }
+            rawChromosomes.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+
+            const selector = document.getElementById('chromosome-selector');
+            selector.innerHTML = '<option value="all">All chromosomes</option>' + rawChromosomes.map(chrom => `<option value="${chrom}">${chrom}</option>`).join('');
+            selector.disabled = rawChromosomes.length <= 1;
+
+            selectedChromosome = rawChromosomes.length > 1 ? rawChromosomes[0] : 'all';
+            if (selectedChromosome !== 'all') {
+              selector.value = selectedChromosome;
+            } else {
+              selector.value = 'all';
+            }
+
+            setChromosomeFilter(selectedChromosome);
+            Graph.zoomToFit(400, 20);
+          })
+          .catch(error => {
+            container.innerHTML = `<div style="padding:1rem;color:#f8d7da;background:#2f1f22;border:1px solid #f5c2c7;">${error.message}</div>`;
+          });
+      }
+
+      loadGraph();
+    </script>
+  </body>
+</html>

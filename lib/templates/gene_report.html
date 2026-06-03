@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gene Report: {{ gene }}</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous" />
+  <style>
+    body { margin:0; font-family: Inter, system-ui, sans-serif; background:#f3f5f8; color:#1f2937; }
+    .toolbar { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:1rem; background:#fff; border-bottom:1px solid #e5e7eb; }
+    .toolbar h5 { margin:0; font-size:1.05rem; }
+    .toolbar a { text-decoration:none; }
+    #report-details { font-size:0.95rem; color:#4b5563; }
+    #igv-container { width:100%; height:calc(100vh - 104px); background:#fff; }
+    .badge { font-size:0.82rem; }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <div style="flex: 1;">
+      <h5>Gene Report: {{ gene }}</h5>
+      <div id="report-details">Region: <strong>{{ chrom }}:{{ start }}-{{ end }}</strong> | Genome: {{ genome }}</div>
+    </div>
+    <div style="display: flex; gap: 0.8rem; align-items: center; flex-wrap: wrap;">
+      <button id="highlight-in-network-btn" class="btn btn-sm btn-info" style="white-space: nowrap;" title="Highlight nodes in this interval in the network visualization">Highlight in Network</button>
+      <input 
+        type="file" 
+        id="bigwig-upload" 
+        accept=".bw,.bigwig,.bedgraph,.bam,.bai,.cram,.crai"
+        title="Upload BigWig, BedGraph, BAM, or CRAM file"
+        style="font-size: 0.85rem; max-width: 220px;" 
+      />
+      <input 
+        type="text" 
+        id="bigwig-url" 
+        placeholder="or paste track URL (BigWig/BAM/CRAM)..." 
+        title="Enter remote track URL (must support CORS and have index available)"
+        style="font-size: 0.85rem; padding: 0.4rem 0.6rem; border: 1px solid #d1d5db; border-radius: 4px; width: 220px;" 
+      />
+      <button id="add-track-btn" class="btn btn-sm btn-primary" style="white-space: nowrap;">Add Track</button>
+      <button id="clear-tracks-btn" class="btn btn-sm btn-outline-secondary" style="white-space: nowrap;" title="Remove all custom tracks">Clear</button>
+    </div>
+  </div>
+  <div id="tracks-status" style="padding: 0.5rem 1rem; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-size: 0.85rem; color: #666; display: none;"></div>
+  <div id="igv-container"></div>
+
+  <script src="/lib/igv/igv.min.js"></script>
+  <script>
+    console.log('Gene report script starting...');
+    const geneName = "{{ gene }}";
+    const chrom = "{{ chrom }}";
+    const start = {{ start }};
+    const end = {{ end }};
+    const locus = chrom + ':' + start + '-' + end;
+    const selectedGenome = "{{ genome }}";
+
+    const genomeSpecUrls = {
+      hg38: 'hg38',
+      hg19: 'hg19',
+      mm39: 'mm39',
+      mm10: 'mm10',
+      rn7: 'rn7',
+      ce11: 'ce11',
+      dm6: 'dm6',
+      tair10: 'tair10',
+      sacCer3: 'sacCer3',
+      danRer11: 'danRer11',
+      danRer10: 'danRer10',
+    };
+    const genomeOption = genomeSpecUrls[selectedGenome] || selectedGenome;
+    const genomeTrackPaths = {
+      hg38: 'https://hgdownload.soe.ucsc.edu/goldenPath/hg38/database/wgEncodeGencodeCompV49.txt.gz',
+      hg19: 'https://hgdownload.soe.ucsc.edu/goldenPath/hg19/database/wgEncodeGencodeCompV49lift37.txt.gz',
+      mm39: 'https://hgdownload.soe.ucsc.edu/goldenPath/mm39/database/wgEncodeGencodeCompVM38.txt.gz',
+      mm10: 'https://hgdownload.soe.ucsc.edu/goldenPath/mm10/database/wgEncodeGencodeCompVM25.txt.gz',
+      rn7: 'https://hgdownload.soe.ucsc.edu/goldenPath/rn7/database/ncbiRefSeq.txt.gz',
+      ce11: 'https://hgdownload.soe.ucsc.edu/goldenPath/ce11/database/ncbiRefSeq.txt.gz',
+      dm6: 'https://hgdownload.soe.ucsc.edu/goldenPath/dm6/database/ncbiRefSeq.txt.gz',
+      tair10: 'https://s3.amazonaws.com/igv.org.genomes/tair10/TAIR10_GFF3_genes.gff',
+      sacCer3: 'https://hgdownload.soe.ucsc.edu/goldenPath/sacCer3/database/ncbiRefSeq.txt.gz',
+      danRer11: 'https://hgdownload.soe.ucsc.edu/goldenPath/danRer11/database/ncbiRefSeq.txt.gz',
+      danRer10: 'https://hgdownload.soe.ucsc.edu/goldenPath/danRer10/database/ncbiRefSeq.txt.gz',
+    };
+
+    const refGeneUrl = genomeTrackPaths[selectedGenome];
+    const refGeneFormat = selectedGenome === 'tair10' ? 'gff3' : 'refgene';
+
+    const tracks = [];
+    if (refGeneUrl) {
+      tracks.push({
+        name: 'Comprehensive Genes',
+        type: 'annotation',
+        format: refGeneFormat,
+        url: refGeneUrl,
+        displayMode: 'EXPANDED',
+        height: 250
+      });
+    }
+
+    const options = {
+      genome: genomeOption,
+      locus: locus,
+      tracks: tracks
+    };
+
+    console.log('IGV options:', { genome: genomeOption, locus: locus, trackCount: tracks.length });
+
+    // Custom track upload handling
+    console.log('Setting up custom track upload handlers...');
+    let customTracks = [];
+    const sessionToken = "{{ session_token }}";
+    let currentBrowser = null;  // Will be set when IGV initializes
+    console.log('Session token from template:', sessionToken);
+
+    function updateTracksStatus() {
+      const status = document.getElementById('tracks-status');
+      if (customTracks.length > 0) {
+        status.innerHTML = '<strong>Custom tracks:</strong> ' + 
+          customTracks.map(function(t, i) {
+            return '<span style="display:inline-block; margin-right:1rem;">' + t.name + 
+              ' <button class="btn btn-xs" style="padding:0 0.3rem; margin-left:0.3rem; font-size:0.75rem;" onclick="removeTrack(' + i + ')">×</button></span>';
+          }).join('');
+        status.style.display = 'block';
+      } else {
+        status.style.display = 'none';
+      }
+    }
+
+    window.removeTrack = function(idx) {
+      if (idx >= 0 && idx < customTracks.length) {
+        const track = customTracks[idx];
+        // Remove from IGV if browser is available
+        if (currentBrowser && currentBrowser.trackViews && currentBrowser.trackViews.length > 0) {
+          const tvToRemove = currentBrowser.trackViews.find(function(tv) {
+            return tv.track.name === track.name && tv.track.url === track.url;
+          });
+          if (tvToRemove) {
+            currentBrowser.removeTrack(tvToRemove.track);
+          }
+        }
+        if (track.blobUrl) {
+          URL.revokeObjectURL(track.blobUrl);
+        }
+        if (track.indexURL && track.indexURL.startsWith('blob:')) {
+          URL.revokeObjectURL(track.indexURL);
+        }
+        customTracks.splice(idx, 1);
+        updateTracksStatus();
+        console.log('Removed track:', track.name);
+      }
+    };
+
+    const addTrackBtn = document.getElementById('add-track-btn');
+    console.log('Add track button element found:', addTrackBtn ? 'YES' : 'NO');
+    
+    if (addTrackBtn) {
+      addTrackBtn.addEventListener('click', async function() {
+        console.log('ADD TRACK BUTTON CLICKED - browser available:', currentBrowser ? 'YES' : 'NO');
+        
+        if (!currentBrowser) {
+          alert('IGV browser is not ready yet. Please wait and try again.');
+          return;
+        }
+        
+        const fileInput = document.getElementById('bigwig-upload');
+        const urlInput = document.getElementById('bigwig-url');
+        const file = fileInput.files[0];
+        const url = urlInput.value.trim();
+
+        if (!file && !url) {
+          alert('Please select a file or enter a BigWig URL.');
+          return;
+        }
+
+        const btn = this;
+        btn.disabled = true;
+        const originalText = btn.textContent;
+        btn.textContent = 'Adding...';
+
+        try {
+          if (file) {
+            const ext = file.name.split('.').pop().toLowerCase();
+            const isBam = ext === 'bam';
+            const isCram = ext === 'cram';
+            const isBedgraph = ext === 'bedgraph';
+
+            // G1 fix: declare trackConfig with let once at the top of this block,
+            // and blobUrl with const so it is in scope for the catch handler.
+            // Previously both were re-declared with var in separate if-branches,
+            // which is function-scoped and silently shadowed; blobUrl was
+            // unreachable in catch if createObjectURL had not yet been called.
+            let trackConfig;
+            const blobUrl = URL.createObjectURL(file);
+
+            if (isBam || isCram) {
+              // BAM/CRAM require an index file — prompt for it
+              const indexFile = await new Promise(function(resolve) {
+                const indexInput = document.createElement('input');
+                indexInput.type = 'file';
+                indexInput.accept = isBam ? '.bai' : '.crai';
+                indexInput.title = 'Select index file (' + (isBam ? '.bai' : '.crai') + ')';
+                indexInput.onchange = function() { resolve(indexInput.files[0] || null); };
+                indexInput.oncancel = function() { resolve(null); };
+                indexInput.click();
+              });
+
+              trackConfig = {
+                name: file.name,
+                url: blobUrl,
+                file: file,
+                format: isBam ? 'bam' : 'cram',
+                type: 'alignment',
+                blobUrl: blobUrl,
+              };
+              if (indexFile) {
+                trackConfig.indexURL = URL.createObjectURL(indexFile);
+                trackConfig.indexFile = indexFile;
+              }
+            } else if (isBedgraph) {
+              trackConfig = {
+                name: file.name,
+                url: blobUrl,
+                file: file,
+                format: 'bedgraph',
+                type: 'wig',
+                indexed: false,
+                blobUrl: blobUrl,
+              };
+            } else {
+              trackConfig = {
+                name: file.name,
+                url: blobUrl,
+                file: file,
+                format: 'bigwig',
+                type: 'wig',
+                indexed: false,
+                supportsRangeQueries: true,
+                blobUrl: blobUrl,
+              };
+            }
+
+            console.log('Adding local file track configuration:', trackConfig);
+            try {
+              await currentBrowser.loadTrackList([trackConfig]);
+              console.log('Track loaded successfully from local blob URL');
+              customTracks.push(trackConfig);
+              updateTracksStatus();
+              fileInput.value = '';
+            } catch (err) {
+              console.error('IGV loadTrackList error:', err);
+              alert('Failed to load track in IGV: ' + String(err));
+              // blobUrl is always defined here because createObjectURL succeeded above
+              URL.revokeObjectURL(blobUrl);
+              if (trackConfig && trackConfig.indexURL) URL.revokeObjectURL(trackConfig.indexURL);
+            }
+          
+          } else if (url) {
+            const urlExt = url.split('?')[0].split('.').pop().toLowerCase();
+            const isRemoteBam = urlExt === 'bam';
+            const isRemoteCram = urlExt === 'cram';
+            const isRemoteBedgraph = urlExt === 'bedgraph';
+            // G1 fix: was re-declared as var trackConfig, shadowing the outer var.
+            const remoteTrackConfig = {
+              name: new URL(url).pathname.split('/').pop() || 'Custom Track',
+              url: url,
+              format: isRemoteBam ? 'bam' : isRemoteCram ? 'cram' : isRemoteBedgraph ? 'bedgraph' : 'bigwig',
+              type: (isRemoteBam || isRemoteCram) ? 'alignment' : 'wig',
+              indexed: (isRemoteBam || isRemoteCram),
+              supportsRangeQueries: true
+            };
+            console.log('Adding remote track configuration:', remoteTrackConfig);
+            try {
+              await currentBrowser.loadTrackList([remoteTrackConfig]);
+              console.log('Remote track loaded successfully');
+              customTracks.push(remoteTrackConfig);
+              updateTracksStatus();
+              urlInput.value = '';
+            } catch (err) {
+              console.error('IGV loadTrackList error:', err);
+              alert('Failed to load remote track in IGV: ' + String(err));
+            }
+          }  
+        } catch (err) {
+          console.error('Error adding track:', err);
+          alert('Error adding track: ' + String(err));
+        } finally {
+          btn.disabled = false;
+          btn.textContent = originalText;
+        }
+      });
+    } else {
+      console.error('Add track button not found!');
+    }
+
+    const clearTracksBtn = document.getElementById('clear-tracks-btn');
+    if (clearTracksBtn) {
+      clearTracksBtn.addEventListener('click', function() {
+        if (customTracks.length === 0) {
+          alert('No custom tracks to remove.');
+          return;
+        }
+        if (confirm('Remove all ' + customTracks.length + ' custom track(s)?')) {
+          // Remove tracks in reverse order to avoid index issues
+          for (let i = customTracks.length - 1; i >= 0; i--) {
+            window.removeTrack(i);
+          }
+        }
+      });
+    }
+
+    // Clean up file input on paste to URL field
+    const bgFileInput = document.getElementById('bigwig-upload');
+    const bgUrlInput = document.getElementById('bigwig-url');
+    if (bgUrlInput) {
+      bgUrlInput.addEventListener('input', function() {
+        if (this.value.trim()) {
+          bgFileInput.value = '';
+        }
+      });
+    }
+    if (bgFileInput) {
+      bgFileInput.addEventListener('change', function() {
+        if (this.files.length) {
+          bgUrlInput.value = '';
+        }
+      });
+    }
+    // END OF CUSTOM TRACK SETUP
+
+    // Handle "Highlight in Network" button
+    const highlightBtn = document.getElementById('highlight-in-network-btn');
+    if (highlightBtn) {
+      highlightBtn.addEventListener('click', function() {
+        if (!currentBrowser) {
+          alert('IGV browser is not ready yet.');
+          return;
+        }
+        
+        // Get current locus from IGV
+        const currentLocus = currentBrowser.referenceFrameList && currentBrowser.referenceFrameList.length > 0
+          ? currentBrowser.referenceFrameList[0]
+          : null;
+        
+        if (!currentLocus || !currentLocus.chr) {
+          alert('Unable to determine current locus.');
+          return;
+        }
+        
+        // Extract chromosome and position range
+        const chr = currentLocus.chr;
+        const igvStart = Math.floor(currentLocus.start);
+        const igvEnd = Math.floor(currentLocus.end);
+        
+        console.log('Current IGV locus:', {chr: chr, start: igvStart, end: igvEnd});
+        
+        // Send back to parent window (the network visualization)
+        const message = {
+          type: 'highlightInterval',
+          chromosome: chr,
+          start: igvStart / 1000000,
+          end: igvEnd / 1000000,
+          locus: chr + ':' + igvStart + '-' + igvEnd
+        };
+        
+        // Try to send to parent window (if opened from parent)
+        if (window.opener && !window.opener.closed) {
+          window.opener.postMessage(message, '*');
+          console.log('Sent interval highlight message to parent window');
+        } else if (window.parent !== window) {
+          // If in an iframe, send to parent
+          window.parent.postMessage(message, '*');
+          console.log('Sent interval highlight message to parent iframe');
+        } else {
+          alert('Gene report was not opened from the network visualization window.');
+        }
+      });
+    }
+
+    igv.createBrowser(document.getElementById('igv-container'), options)
+      .then(function(browser) {
+        console.log('IGV report browser created successfully for', locus);
+        currentBrowser = browser;
+        console.log('Loaded tracks:', browser.trackViews.length);
+        browser.trackViews.forEach(function(tv, idx) {
+          console.log('Track', idx, ':', tv.track.name, '- searchable:', tv.track.searchable || 'N/A');
+        });
+      })
+      .catch(function(error) {
+        console.error('IGV browser failed to initialize:', error);
+        document.getElementById('igv-container').innerHTML = '<div style="padding:1rem;color:#b91c1c;"><strong>Unable to create IGV report:</strong><br>' + String(error) + '</div>';
+      });
+      
+  </script>
+</body>
+</html>

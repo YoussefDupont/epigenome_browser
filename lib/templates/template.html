@@ -1,0 +1,2913 @@
+<html>
+    <head>
+        <meta charset="utf-8">
+        {% if cdn_resources=="local" %}
+          <script src="/lib/bindings/utils.js"></script>
+            <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/dist/vis-network.min.css" integrity="sha512-WgxfT5LWjfszlPHXRmBWHkV2eceiWTOBvrKCNbdgDYTHrT2AeLCGbF4sZlZw3UMN3WtL0tGUoIAKsu8mllg/XA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/vis-network.min.js" integrity="sha512-LnvoEWDFrqGHlHmDD2101OrLcbsfkrzoSpvtSQtxK3RMnRV0eOkhhBN2dXHKRrUU8p2DGRTk35n4O8nWSVe1mQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+            {% if select_menu or filter_menu %}
+            <link href="/lib/tom-select/tom-select.css" rel="stylesheet">
+            <script src="/lib/tom-select/tom-select.complete.min.js"></script>
+            {%  endif %}
+        {% elif cdn_resources=="in_line" %}
+            <script>{%  include 'lib/bindings/utils.js' %}</script>
+            <style>{%  include 'lib/vis-9.1.2/vis-network.css' %}</style>
+            <script>{%  include 'lib/vis-9.1.2/vis-network.min.js' %}</script>
+            {% if select_menu or filter_menu %}
+                <style>{%  include 'lib/tom-select/tom-select.css' %}</style>
+                <script>{%  include 'lib/tom-select/tom-select.complete.min.js' %}</script>
+            {%  endif %}
+        {%  elif cdn_resources=="remote" %}
+            <script>{%  include 'lib/bindings/utils.js' %}</script>
+            <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/dist/vis-network.min.css" integrity="sha512-WgxfT5LWjfszlPHXRmBWHkV2eceiWTOBvrKCNbdgDYTHrT2AeLCGbF4sZlZw3UMN3WtL0tGUoIAKsu8mllg/XA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/vis-network.min.js" integrity="sha512-LnvoEWDFrqGHlHmDD2101OrLcbsfkrzoSpvtSQtxK3RMnRV0eOkhhBN2dXHKRrUU8p2DGRTk35n4O8nWSVe1mQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+            {#            <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.0.4/dist/dist/vis-network.min.css" integrity="sha512-+5tJeVsSE2tSnmKB5SWOD0GsYA5dOP0B/FSv7I2GYhdOcyjJq81Q1St3qgJgInwreAdNuw0KGJ0FOaxOJ0E4yw==" crossorigin="anonymous" referrerpolicy="no-referrer" />#}
+            {#            <script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.0.4/dist/vis-network.js"#}
+            {#                integrity="sha512-CEbUhbSq35hCqBH8ckfAkH1Tcua5NEywtEzwiJ+BUC4EIZkC7vyta3ivZu/WqJhK1qHTurO3hwHsErU3HHjwIA=="#}
+            {#                crossorigin="anonymous"#}
+            {#                referrerpolicy="no-referrer"></script>#}
+            {% if select_menu or filter_menu %}
+                <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tom-select/2.0.0-rc.4/css/tom-select.min.css" integrity="sha512-43fHB3GLgZfz8QXl1RPQ8O66oIgv3po9cJ5erMt1c4QISq9dYb195T3vr5ImnJPXuVroKcGBPXBFKETW8jrPNQ==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+                <script src="https://cdnjs.cloudflare.com/ajax/libs/tom-select/2.0.0-rc.4/js/tom-select.complete.js" integrity="sha512-jeF9CfnvzDiw9G9xiksVjxR2lib44Gnovvkv+3CgCG6NXCD4gqlA5nDAVW5WjpA+i+/zKsUWV5xNEbW1X/HH0Q==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+            {%  endif %}
+
+        {% endif %}
+
+<!-- <link rel="stylesheet" href="../node_modules/vis/dist/vis.min.css" type="text/css" />
+<script type="text/javascript" src="../node_modules/vis/dist/vis.js"> </script>-->
+        <link
+          href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta3/dist/css/bootstrap.min.css"
+          rel="stylesheet"
+          integrity="sha384-eOJMYsd53ii+scO/bJGFsiCZc+5NDVN2yr8+0RDqr0Ql0h+rP48ckxlpbzKgwra6"
+          crossorigin="anonymous"
+        />
+        <script
+          src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta3/dist/js/bootstrap.bundle.min.js"
+          integrity="sha384-JEW9xMcG8R+pH31jmWH6WWP0WintQrMb4s7ZOdauHnUtxwoG2vI5DkLtS3qm9Ekf"
+          crossorigin="anonymous"
+        ></script>
+
+
+        <style type="text/css">
+
+             /* TAD visibility sidebar */
+             #network-area {
+                 display: flex;
+                 flex-direction: row;
+                 align-items: stretch;
+             }
+             #left-sidebar {
+                 width: 240px;
+                 min-width: 240px;
+                 height: {{height}};
+                 display: flex;
+                 flex-direction: column;
+                 gap: 12px;
+                 padding: 10px 10px 8px 10px;
+                 background: #fafafa;
+                 box-sizing: border-box;
+                 border-right: 1px solid #dee2e6;
+                 flex-shrink: 0;
+             }
+             .sidebar-panel {
+                 background: #fff;
+                 border: 1px solid #dee2e6;
+                 border-radius: 8px;
+                 padding: 10px 12px;
+                 box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+                 overflow-y: auto;
+                 flex: 1 1 0;
+             }
+             #tad-panel {
+                 flex: 9 1 0;
+             }
+             #gene-panel {
+                 flex: 1 1 0;
+             }
+             .sidebar-panel .panel-header {
+                 font-size: 0.92em;
+                 font-weight: 700;
+                 margin-bottom: 8px;
+                 color: #333;
+             }
+             #tad-panel {
+                 width: 100%;
+                 min-width: 0;
+                 height: auto;
+                 overflow-y: auto;
+                 font-size: 0.82em;
+                 line-height: 1.5;
+                 background: transparent;
+                 box-sizing: border-box;
+                 flex-shrink: 0;
+                 padding: 0;
+                 border: none;
+             }
+             #gene-panel {
+                 width: 100%;
+                 min-width: 0;
+                 overflow-y: auto;
+                 background: transparent;
+                 box-sizing: border-box;
+                 flex: 1 1 auto;
+                 padding: 0;
+                 border: none;
+             }
+
+             .gene-row {
+                 display: flex;
+                 justify-content: space-between;
+                 gap: 10px;
+                 padding: 6px 0;
+                 border-bottom: 1px solid #f0f0f0;
+                 font-size: 0.85em;
+             }
+             .gene-row:last-child { border-bottom: none; }
+             .gene-link {
+                 color: #0d6efd;
+                 text-decoration: none;
+             }
+             .gene-link:hover {
+                 text-decoration: underline;
+             }
+             .gene-meta {
+                 color: #555;
+             }
+             .fallback-links {
+                 display: flex;
+                 flex-direction: column;
+                 gap: 6px;
+                 margin-top: 8px;
+             }
+             .fallback-links a {
+                 color: #0d6efd;
+                 text-decoration: none;
+                 font-size: 0.85em;
+             }
+             .fallback-links a:hover {
+                 text-decoration: underline;
+             }
+             .fallback-message {
+                 color: #444;
+                 margin-bottom: 8px;
+                 font-size: 0.88em;
+             }
+             .fallback-link {
+                 display: inline-block;
+             }
+
+             .network-canvas-wrap {
+                 flex: 1;
+                 min-width: 0;
+                 position: relative;
+             }
+             #layout-diagnostics {
+                 position: absolute;
+                 bottom: 14px;
+                 left: 14px;
+                 background: rgba(255, 255, 255, 0.97);
+                 border: 1px solid #ccc;
+                 border-radius: 6px;
+                 padding: 10px 14px;
+                 font-size: 0.80em;
+                 line-height: 1.6;
+                 z-index: 15;
+                 pointer-events: none;
+                 box-shadow: 2px 4px 12px rgba(0, 0, 0, 0.15);
+                 color: #333;
+             }
+             #legend-panel {
+                 position: absolute;
+                 bottom: 14px;
+                 right: 14px;
+                 background: rgba(255, 255, 255, 0.97);
+                 border: 1px solid #ccc;
+                 border-radius: 6px;
+                 padding: 10px 14px;
+                 font-size: 0.80em;
+                 line-height: 1.4;
+                 z-index: 15;
+                 pointer-events: auto;
+                 box-shadow: 2px 4px 12px rgba(0, 0, 0, 0.15);
+                 min-width: 220px;
+                 overflow-y: auto;
+                 max-height: 520px;
+                 color: #333;
+             }
+             #legend-panel h4 {
+                 margin: 0 0 6px 0;
+                 font-size: 0.95em;
+                 font-weight: 600;
+             }
+             .legend-swatch {
+                 display: inline-block;
+                 width: 12px;
+                 height: 12px;
+                 border-radius: 50%;
+                 margin-right: 4px;
+             }
+             .legend-gradient {
+                 height: 18px;
+                 border-radius: 3px;
+                 border: 1px solid #ccc;
+                 margin-bottom: 8px;
+                 width: 100%;
+             }
+             #mynetwork {
+                 width: 100%;
+                 height: {{height}};
+                 background-color: {{bgcolor}};
+                 border: 1px solid lightgray;
+                 position: relative;
+             }
+
+             /* Color-mode toolbar */
+             #color-mode-bar {
+                 padding: 8px 12px;
+                 background: #f8f9fa;
+                 border: none;
+                 border-top: 1px solid #ddd;
+                 margin: 8px 0;
+                 display: flex;
+                 align-items: center;
+                 gap: 14px;
+                 flex-wrap: wrap;
+                 font-size: 0.92em;
+             }
+             #color-mode-bar label {
+                 display: inline-flex;
+                 align-items: center;
+                 gap: 4px;
+                 margin: 0;
+                 flex-shrink: 0;
+                 white-space: nowrap;
+             }
+             #color-mode-bar button {
+                 flex-shrink: 0;
+             }
+
+             {% if nodes|length > 100 and physics_enabled %}
+             #loadingBar {
+                 position:absolute;
+                 top:0px;
+                 left:0px;
+                 width: {{width}};
+                 height: {{height}};
+                 background-color:rgba(200,200,200,0.8);
+                 -webkit-transition: all 0.5s ease;
+                 -moz-transition: all 0.5s ease;
+                 -ms-transition: all 0.5s ease;
+                 -o-transition: all 0.5s ease;
+                 transition: all 0.5s ease;
+                 opacity:1;
+             }
+
+             #bar {
+                 position:absolute;
+                 top:0px;
+                 left:0px;
+                 width:20px;
+                 height:20px;
+                 margin:auto auto auto auto;
+                 border-radius:11px;
+                 border:2px solid rgba(30,30,30,0.05);
+                 background: rgb(0, 173, 246); /* Old browsers */
+                 box-shadow: 2px 0px 4px rgba(0,0,0,0.4);
+             }
+
+             #border {
+                 position:absolute;
+                 top:10px;
+                 left:10px;
+                 width:500px;
+                 height:23px;
+                 margin:auto auto auto auto;
+                 box-shadow: 0px 0px 4px rgba(0,0,0,0.2);
+                 border-radius:10px;
+             }
+
+             #text {
+                 position:absolute;
+                 top:8px;
+                 left:530px;
+                 width:30px;
+                 height:50px;
+                 margin:auto auto auto auto;
+                 font-size:22px;
+                 color: #000000;
+             }
+
+             div.outerBorder {
+                 position:relative;
+                 top:400px;
+                 width:600px;
+                 height:44px;
+                 margin:auto auto auto auto;
+                 border:8px solid rgba(0,0,0,0.1);
+                 background: rgb(252,252,252); /* Old browsers */
+                 background: -moz-linear-gradient(top,  rgba(252,252,252,1) 0%, rgba(237,237,237,1) 100%); /* FF3.6+ */
+                 background: -webkit-gradient(linear, left top, left bottom, color-stop(0%,rgba(252,252,252,1)), color-stop(100%,rgba(237,237,237,1))); /* Chrome,Safari4+ */
+                 background: -webkit-linear-gradient(top,  rgba(252,252,252,1) 0%,rgba(237,237,237,1) 100%); /* Chrome10+,Safari5.1+ */
+                 background: -o-linear-gradient(top,  rgba(252,252,252,1) 0%,rgba(237,237,237,1) 100%); /* Opera 11.10+ */
+                 background: -ms-linear-gradient(top,  rgba(252,252,252,1) 0%,rgba(237,237,237,1) 100%); /* IE10+ */
+                 background: linear-gradient(to bottom,  rgba(252,252,252,1) 0%,rgba(237,237,237,1) 100%); /* W3C */
+                 filter: progid:DXImageTransform.Microsoft.gradient( startColorstr='#fcfcfc', endColorstr='#ededed',GradientType=0 ); /* IE6-9 */
+                 border-radius:72px;
+                 box-shadow: 0px 0px 10px rgba(0,0,0,0.2);
+             }
+             {% endif %}
+
+             {% if conf %}
+             #config {
+                 float: left;
+                 width: 400px;
+                 height: 600px;
+             }
+             {% endif %}
+
+             {% if tooltip_link %}
+             /* position absolute is important and the container has to be relative or absolute as well. */
+          div.popup {
+                 position:absolute;
+                 top:0px;
+                 left:0px;
+                 display:none;
+                 background-color:#f5f4ed;
+                 -moz-border-radius: 3px;
+                 -webkit-border-radius: 3px;
+                 border-radius: 3px;
+                 border: 1px solid #808074;
+                 box-shadow: 3px 3px 10px rgba(0, 0, 0, 0.2);
+          }
+
+        
+          /* hide the original tooltip */
+          .vis-tooltip {
+            display:none;
+          }
+             {% endif %}
+        </style>
+    </head>
+
+
+    <body>
+        <div class="card vis-card-wrap" style="width: 100%">
+            <!-- Color-mode toolbar -->
+            <div id="color-mode-bar" class="card-header">
+              <strong style="margin-right:4px">Color mode:</strong>
+              <label><input type="radio" name="colorMode" value="tad" checked onchange="applyColorMode(this.value, true)"> TAD Cluster</label>
+              <label style="margin-left:8px;display:inline-flex;align-items:center;gap:6px" id="tad-colormap-label">
+                <span style="white-space:nowrap">Colormap:</span>
+                <select id="tad-colormap" onchange="applyColorMode('tad', true)"
+                        style="font-size:0.9em;padding:2px 6px;border:1px solid #ccc;border-radius:4px;background:#fff;cursor:pointer">
+                  <option value="native">Tab20b</option>
+                  <option value="rainbow">Rainbow</option>
+                  <option value="viridis">Viridis</option>
+                  <option value="plasma">Plasma</option>
+                  <option value="inferno">Inferno</option>
+                  <option value="magma">Magma</option>
+                  <option value="cool">Cool</option>
+                  <option value="hot">Hot</option>
+                  <option value="rdylbu">Red-Yellow-Blue</option>
+                  <option value="spectral">Spectral</option>
+                  <option value="hsv">HSV</option>
+                </select>
+              </label>
+              <label><input type="radio" name="colorMode" value="coordinate" onchange="applyColorMode(this.value, true)"> Coordinate</label>
+              <label style="margin-left:8px;display:inline-flex;align-items:center;gap:6px" id="coordinate-colormap-label">
+                <span style="white-space:nowrap">Colormap:</span>
+                <select id="coordinate-colormap" onchange="applyColorMode('coordinate', true)"
+                        style="font-size:0.9em;padding:2px 6px;border:1px solid #ccc;border-radius:4px;background:#fff;cursor:pointer">
+                  <option value="viridis">Viridis</option>
+                  <option value="heatmap">Heatmap</option>
+                  <option value="rainbow">Rainbow</option>
+                  <option value="plasma">Plasma</option>
+                  <option value="inferno">Inferno</option>
+                  <option value="magma">Magma</option>
+                  <option value="cool">Cool</option>
+                  <option value="hot">Hot</option>
+                  <option value="rdylbu">Red-Yellow-Blue</option>
+                  <option value="spectral">Spectral</option>
+                  <option value="hsv">HSV</option>
+                </select>
+              </label>
+              <div id="dynamic-color-modes"></div>
+              <label id="color-clamp-label" style="margin-left:12px;gap:6px;display:none">
+                <span style="white-space:nowrap">Color clamp:</span>
+                <select id="sigma-clamp" onchange="applyColorMode(document.querySelector('input[name=colorMode]:checked').value, true)"
+                        style="font-size:0.9em;padding:1px 4px;border:1px solid #ccc;border-radius:4px;background:#fff;cursor:pointer">
+                  <option value="1">±1σ</option>
+                  <option value="2">±2σ</option>
+                  <option value="3" selected>±3σ</option>
+                  <option value="4">±4σ</option>
+                  <option value="5">±5σ</option>
+                </select>
+              </label>
+              <button onclick="resetPositions()" style="margin-left:auto;font-size:0.82em;padding:3px 10px;border:1px solid #ccc;border-radius:4px;background:#fff;cursor:pointer">Reset Positions</button>
+              <button onclick="runPhysicsOnFiltered()" style="font-size:0.82em;padding:3px 10px;border:1px solid #28a745;border-radius:4px;background:#fff;color:#28a745;cursor:pointer" title="Run physics stabilization on filtered nodes only">Rerun Physics</button>
+              <button onclick="exportNetwork()" style="font-size:0.82em;padding:3px 10px;border:1px solid #4472c4;border-radius:4px;background:#fff;color:#4472c4;cursor:pointer" title="Export physics-solved node coordinates and edges as JSON">Export JSON</button>
+            </div>
+            {% if select_menu or filter_menu %}
+            <div id="select-filter-bar" class="card-header" style="padding: 8px 12px;">
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:nowrap;">
+                {% if select_menu %}
+                <div style="flex:1.4 1 150px;min-width:0;">
+                  <select
+                    class="form-select form-select-sm"
+                    aria-label="Default select example"
+                    onchange="selectNode([value]);"
+                    id="select-node"
+                    placeholder="Select a Node by ID"
+                  >
+                    <option selected>Select a Node by ID</option>
+                    {% for node in nodes %}
+                        <option value="{{ node.id }}">{{node.id}}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div style="flex:1.4 1 180px;min-width:0;">
+                  <select
+                    class="form-select form-select-sm"
+                    aria-label="Gene search"
+                    id="gene-search"
+                  >
+                    <option value="">Search genes...</option>
+                  </select>
+                </div>
+                <div style="flex:0 0 auto;">
+                  <button type="button" class="btn btn-primary btn-sm" onclick="neighbourhoodHighlight({nodes: []});">Reset View</button>
+                </div>
+                {% endif %}
+                {% if filter_menu %}
+                <div style="flex:1 1 140px;min-width:0;">
+                  <select
+                    class="form-select form-select-sm"
+                    aria-label="Default select example"
+                    onchange="updateFilter(value, 'property')"
+                    id="select-property"
+                  >
+                    <option value="">Node property...</option>
+                  </select>
+                </div>
+                <div style="flex:0 0 100px;">
+                  <select
+                    class="form-select form-select-sm"
+                    id="select-operator"
+                    onchange="updateFilter(this.value, 'operator')"
+                  >
+                    <option value="eq" selected>=</option>
+                    <option value="gt">></option>
+                    <option value="lt"><</option>
+                  </select>
+                </div>
+                <div style="flex:1 1 140px;min-width:0;">
+                  <select
+                    class="form-select form-select-sm"
+                    aria-label="Default select example"
+                    id="select-value"
+                  >
+                    <option value="">Value(s)...</option>
+                  </select>
+                </div>
+                <div style="flex:0 0 auto;">
+                  <button type="button" class="btn btn-primary btn-sm" onclick="highlightFilter(filter);">Filter</button>
+                </div>
+                <div style="flex:0 0 auto;">
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="clearFilter(true)">Reset</button>
+                </div>
+                {% endif %}
+              </div>
+            </div>
+            {% endif %}
+            <div id="network-area">
+              <div id="left-sidebar">
+                <div id="tad-panel" class="sidebar-panel">
+                  <div class="panel-header">TAD Visibility</div>
+                </div>
+                <div id="gene-panel" class="sidebar-panel">
+                  <div class="panel-header">Genes in selected region</div>
+                  <div id="gene-panel-body" style="font-size:0.85em;color:#555;line-height:1.4">
+                    Select a node to load genes overlapping its genomic bin.
+                  </div>
+                </div>
+              </div>
+              <div class="network-canvas-wrap">
+                <div id="mynetwork"></div>
+                <div id="layout-diagnostics">Layout diagnostics pending...</div>
+                <div id="legend-panel"></div>
+              </div>
+            </div>
+        </div>
+
+        {% if nodes|length > 100 and physics_enabled %}
+            <div id="loadingBar" style="display:none">
+              <div class="outerBorder">
+                <div id="text">0%</div>
+                <div id="border">
+                  <div id="bar"></div>
+                </div>
+              </div>
+            </div>
+        {% endif %}
+        {% if conf %}
+            <div id="config"></div>
+        {% endif %}
+
+        <script type="text/javascript">
+
+              // initialize global variables
+              var edges;
+              var nodes;
+              var allNodes;
+              var allEdges;
+              var nodeColors;
+              var originalNodes;
+              var network;
+              var container;
+              var options, data;
+              var highlightActive = false;  // Track if neighbourhood highlight is currently active
+              var filterActive = false;     // Track if filter highlight is currently active
+              var filter = {
+                  item : 'node',
+                  property : '',
+                  operator : 'eq',
+                  value : []
+              };
+              var allTadColormapColors = {};  // Stores TAD label → color mapping for current colormap
+              var _globalGeneOptions = []; 
+              
+              // Gradient-based colormaps: each colormap is defined as key color stops
+              var tadColormaps = {
+                rainbow: [
+                  {pos: 0.0, h: '#FF0000'}, {pos: 0.143, h: '#FF7F00'}, {pos: 0.286, h: '#FFFF00'}, 
+                  {pos: 0.429, h: '#00FF00'}, {pos: 0.571, h: '#00FFFF'}, {pos: 0.714, h: '#0000FF'}, {pos: 0.857, h: '#4B0082'}, {pos: 1.0, h: '#9400D3'}
+                ],
+                viridis: [
+                  {pos: 0.0, h: '#440154'}, {pos: 0.25, h: '#3b518f'}, {pos: 0.5, h: '#23888d'}, 
+                  {pos: 0.75, h: '#35b779'}, {pos: 1.0, h: '#fde724'}
+                ],
+                plasma: [
+                  {pos: 0.0, h: '#0d0887'}, {pos: 0.25, h: '#7201a8'}, {pos: 0.5, h: '#bd3786'}, 
+                  {pos: 0.75, h: '#ed7953'}, {pos: 1.0, h: '#f0f921'}
+                ],
+                inferno: [
+                  {pos: 0.0, h: '#000004'}, {pos: 0.25, h: '#420a68'}, {pos: 0.5, h: '#dd513a'}, 
+                  {pos: 0.75, h: '#fca636'}, {pos: 1.0, h: '#fffffe'}
+                ],
+                magma: [
+                  {pos: 0.0, h: '#000004'}, {pos: 0.25, h: '#3b0f70'}, {pos: 0.5, h: '#87263a'}, 
+                  {pos: 0.75, h: '#d8720b'}, {pos: 1.0, h: '#fffffe'}
+                ],
+                cool: [
+                  {pos: 0.0, h: '#00FFFF'}, {pos: 0.5, h: '#0099FF'}, {pos: 1.0, h: '#001AFF'}
+                ],
+                hot: [
+                  {pos: 0.0, h: '#000000'}, {pos: 0.33, h: '#CC0000'}, {pos: 0.67, h: '#FF6600'}, 
+                  {pos: 1.0, h: '#FFCC00'}
+                ],
+                rdylbu: [
+                  {pos: 0.0, h: '#A50026'}, {pos: 0.25, h: '#F46D43'}, {pos: 0.5, h: '#FEE090'}, 
+                  {pos: 0.75, h: '#74ADD1'}, {pos: 1.0, h: '#313695'}
+                ],
+                spectral: [
+                  {pos: 0.0, h: '#9E0142'}, {pos: 0.25, h: '#F46D43'}, {pos: 0.5, h: '#FEE08B'}, 
+                  {pos: 0.75, h: '#66C2A5'}, {pos: 1.0, h: '#3288BD'}
+                ],
+                hsv: [
+                  {pos: 0.0, h: '#FF0000'}, {pos: 0.17, h: '#FF7F00'}, {pos: 0.33, h: '#00FF00'}, 
+                  {pos: 0.5, h: '#00FFFF'}, {pos: 0.67, h: '#0000FF'}, {pos: 0.83, h: '#FF00FF'}, 
+                  {pos: 1.0, h: '#FF0000'}
+                ],
+                heatmap: [
+                  {pos: 0.0, h: '#0000FF'}, {pos: 0.4999, h: '#FFFFFF'}, {pos: 0.5001, h: '#FFFFFF'}, {pos: 1.0, h: '#FF0000'}
+                ]
+              };
+
+              var currentTadColormap = 'native';
+              if (annotationConfig && annotationConfig.tad_colormap && tadColormaps.hasOwnProperty(annotationConfig.tad_colormap)) {
+                currentTadColormap = annotationConfig.tad_colormap;
+              }
+
+              var currentCoordinateColormap = 'viridis';
+
+              // Initial display settings
+              document.getElementById('coordinate-colormap-label').style.display = 'none';
+              document.getElementById('coordinate-colormap').value = currentCoordinateColormap;
+
+              // Convert hex to RGB
+              function hexToRgb(hex) {
+                var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+                return result ? {
+                  r: parseInt(result[1], 16),
+                  g: parseInt(result[2], 16),
+                  b: parseInt(result[3], 16)
+                } : {r: 0, g: 0, b: 0};
+              }
+
+              // Convert RGB to hex
+              function rgbToHex(r, g, b) {
+                return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+              }
+
+              // Interpolate color at position (0.0-1.0) across colormap gradient
+              function interpolateGradient(position, colorstops) {
+                position = Math.max(0, Math.min(1, position));
+                
+                // Find the two surrounding color stops
+                var lower = colorstops[0];
+                var upper = colorstops[colorstops.length - 1];
+                
+                for (var i = 0; i < colorstops.length - 1; i++) {
+                  if (position >= colorstops[i].pos && position <= colorstops[i+1].pos) {
+                    lower = colorstops[i];
+                    upper = colorstops[i+1];
+                    break;
+                  }
+                }
+                
+                // Interpolate between lower and upper
+                var range = upper.pos - lower.pos;
+                var t = range > 0 ? (position - lower.pos) / range : 0;
+                
+                var lowerRgb = hexToRgb(lower.h);
+                var upperRgb = hexToRgb(upper.h);
+                
+                var r = Math.round(lowerRgb.r + t * (upperRgb.r - lowerRgb.r));
+                var g = Math.round(lowerRgb.g + t * (upperRgb.g - lowerRgb.g));
+                var b = Math.round(lowerRgb.b + t * (upperRgb.b - lowerRgb.b));
+                
+                return rgbToHex(r, g, b);
+              }
+
+              function getTadColormapColor(tadIndex, totalTads) {
+                if (currentTadColormap === 'native') {
+                  return '#888888';
+                }
+                var colorstops = tadColormaps[currentTadColormap] || tadColormaps['viridis'];
+                // Map TAD index to position 0.0-1.0 across gradient
+                var position = totalTads > 1 ? tadIndex / (totalTads - 1) : 0.5;
+                return interpolateGradient(position, colorstops);
+              }
+
+              function assignTadColors(tadLabels) {
+                var colors = {};
+                var sortedLabels = tadLabels.filter(function(l) { return l !== 'Unassigned' && l !== 'Not clustered'; }).sort();
+                sortedLabels.forEach(function(label, idx) {
+                  colors[label] = getTadColormapColor(idx, sortedLabels.length);
+                });
+                if (tadLabels.some(function(l) { return l === 'Unassigned' || l === 'Not clustered'; })) {
+                  colors['Unassigned'] = '#aaaaaa';
+                  if (tadLabels.some(function(l) { return l === 'Not clustered'; })) {
+                    colors['Not clustered'] = '#aaaaaa';
+                  }
+                }
+                return colors;
+              }
+
+              {% if select_menu %}
+                  var selectNodeControl = new TomSelect("#select-node",{
+                      create: false,
+                      maxOptions: null,
+                      sortField: {
+                          field: "text",
+                          direction: "asc"
+                      }
+                  });
+                  var geneSearchControl = new TomSelect("#gene-search", {
+                      create: false,
+                      maxOptions: null,
+                      valueField: 'value',
+                      labelField: 'text',
+                      searchField: 'text',
+                      sortField: { field: 'text', direction: 'asc' },
+                      placeholder: 'Search genes...',
+                      onChange: onGeneSearchChange
+                  });
+                  window.geneToNodes = {};
+                  window.geneToRanges = {};
+
+                  function onGeneSearchChange(geneName) {
+                      window._activeGeneSearchName = geneName || null;
+                      if (!geneName) return;
+
+                      var range = (window.geneToRanges && window.geneToRanges[geneName]) || null;
+
+                      var nodeIds = window.geneToNodes[geneName] || [];
+                      if (!nodeIds.length) {
+                          geneSearchControl.clear();
+                          return;
+                      }
+
+                      // Highlight all matching nodes for this gene.
+                      selectNode(nodeIds);
+
+                      // Sync the dropdown and metadata state to a representative node.
+                      var representative = nodeIds[0];
+                      if (typeof selectNodeControl !== 'undefined') {
+                          selectNodeControl.setValue(representative, true);
+                      }
+                      if (typeof window.setPopupNodeId === 'function') {
+                          window.setPopupNodeId(representative);
+                      }
+                      if (typeof window.buildMetadataPopup === 'function') {
+                          window.buildMetadataPopup(representative);
+                      }
+                      if (typeof window.fetchGenesForNode === 'function') {
+                          window.fetchGenesForNode(representative);
+                      }
+
+                      geneSearchControl.clear();
+                  }
+              {%  endif %}
+
+              {% if filter_menu %}
+                  let updateValueFilter = function() {
+                      return function () {
+                          filter['value'].push(arguments[0]);
+                      }
+                  }
+
+                  let valueControl = new TomSelect("#select-value",{
+                      maxItems: null,
+                      valueField: 'id',
+                      labelField: 'title',
+                      searchField: 'title',
+                      create: true,
+                      sortField: { field: "text", direction: "asc" },
+                      onItemAdd: updateValueFilter()
+                  });
+
+                  // When a node property is selected, populate the value dropdown
+                  let addValues = function() {
+                      return function () {
+                          let selectedProperty = arguments[0];
+                          valueControl.clear();
+                          valueControl.clearOptions();
+                          filter['value'] = [];
+                          var seenValues = {};
+                        var edgeProps = { weight: true, genomic_dist_mb: true };
+                        var sourceObj = edgeProps[selectedProperty] ? allEdges : allNodes;
+                        for (let each in sourceObj) {
+                          var v = sourceObj[each][selectedProperty];
+                          if ((v === null || v === undefined || v === '') && selectedProperty === 'weight') {
+                            // Backward compatibility: pyvis may store edge weight in `value`.
+                            v = sourceObj[each].value;
+                          }
+                          if (v === null || v === undefined || v === '') continue;
+                          var key = v.toString();
+                          if (!seenValues[key]) {
+                            seenValues[key] = true;
+                            valueControl.addOption({ id: key, title: key });
+                          }
+                          }
+                      }
+                  };
+
+                  let propControl = new TomSelect("#select-property",{
+                      valueField: 'id',
+                      labelField: 'title',
+                      searchField: 'title',
+                      create: false,
+                      sortField: { field: "text", direction: "asc" },
+                      onItemAdd: addValues()
+                  });
+
+                  function clearFilter(reset) {
+                      propControl.clear();          // deselect, keep options intact
+                      valueControl.clear();
+                      valueControl.clearOptions();  // value options are repopulated dynamically
+                      document.getElementById('select-operator').value = 'eq';
+                      filter = { item: 'node', property: '', operator: 'eq', value: [] };
+                      if (reset) {
+                          filterHighlight({nodes: []});
+                      }
+                  }
+
+                  function updateFilter(value, key) {
+                      filter[key] = value;
+                  }
+
+              {%  endif %}
+
+              // This method is responsible for drawing the graph, returns the drawn network
+              function drawGraph() {
+                  var container = document.getElementById('mynetwork');
+
+                  {% if use_DOT %}
+
+                  var DOTstring = "{{dot_lang|safe}}";
+                  var parsedData = vis.network.convertDot(DOTstring);
+
+                  data = {
+                    nodes: parsedData.nodes,
+                    edges: parsedData.edges
+                  }
+
+                  var options = parsedData.options;
+                  options.nodes = {
+                      shape: "dot"
+                  }
+
+                  {% else %}
+
+                  // parsing and collecting nodes and edges JSON data into arrays
+                  nodes = new vis.DataSet([], {queue: true});
+                  edges = new vis.DataSet([], {queue: true});
+
+                  // adding nodes and edges to the graph
+                  data = {nodes: nodes, edges: edges};
+
+                  var options = {{options|safe}};
+
+                  {% endif %}
+
+
+                  {% if conf %}
+                  // if this network requires displaying the configure window,
+                  // put it in its div
+                  options.configure["container"] = document.getElementById("config");
+                  {% endif %}
+
+                  network = new vis.Network(container, data, options);
+
+                  var tadColormapSelect = document.getElementById('tad-colormap');
+                  if (tadColormapSelect) {
+                    tadColormapSelect.value = currentTadColormap;
+                  }
+
+                  // Define _applyChromosomePositioning early (before physics initialization)
+                  window._applyChromosomePositioning = function() {
+                    console.log('===== _applyChromosomePositioning called =====');
+                    allNodes = nodes.get({ returnType: 'Object' });
+                    var chromMap = {};
+                    for (var nid in allNodes) {
+                      var nd = allNodes[nid];
+                      var chrom = nd.chrom || nd.chr || '(no chrom)';
+                      if (!chromMap[chrom]) chromMap[chrom] = [];
+                      chromMap[chrom].push(nd);
+                    }
+                    var chromosomes = Object.keys(chromMap).sort(function(a,b){
+                      if (a === '') return 1;
+                      if (b === '') return -1;
+                      return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
+                    });
+                    console.log('Chromosomes found:', chromosomes);
+                    var updates = [];
+                    var spacing = 1300;
+                    var bandHeight = 900;
+                    chromosomes.forEach(function(chrom, idx) {
+                      var stats = coordStatsByChrom[chrom] || coordStats;
+                      var nodesInChrom = chromMap[chrom].slice().sort(function(a,b){
+                        var aVal = parseFloat(a.startA); if (isNaN(aVal)) aVal = 0;
+                        var bVal = parseFloat(b.startA); if (isNaN(bVal)) bVal = 0;
+                        return aVal - bVal;
+                      });
+                      console.log('  ' + chrom + ': ' + nodesInChrom.length + ' nodes');
+                      nodesInChrom.forEach(function(nd, j) {
+                          var y;
+                          var x;
+                          if (!isNaN(parseFloat(nd.startA))) {
+                            var range = (stats.max - stats.min) || 1;
+                            var t = Math.max(0, Math.min(1, (parseFloat(nd.startA) - stats.min) / range));
+                            // Spread nodes across the band in X based on genomic
+                            // position, and in Y as a small jittered ordering.
+                            var bandWidth = 800;
+                            x = idx * spacing + (t - 0.5) * bandWidth;
+                            y = (t - 0.5) * bandHeight;
+                          } else {
+                            var bandWidth = 800;
+                            x = idx * spacing + ((j / Math.max(1, nodesInChrom.length - 1)) - 0.5) * bandWidth;
+                            y = ((j / Math.max(1, nodesInChrom.length - 1)) - 0.5) * bandHeight;
+                          }
+                          // Add significant random jitter to break up diagonal pattern
+                          // and give physics engine more to do
+                          var jitterX = (Math.random() - 0.5) * 400;  // ±200 pixels
+                          var jitterY = (Math.random() - 0.5) * 400;  // ±200 pixels
+                          x += jitterX;
+                          y += jitterY;
+                          
+                          updates.push({ id: nd.id, x: x, y: y, physics: true });
+                      });
+                    });
+                    if (updates.length) {
+                      nodes.update(updates);
+                      console.log('Applied initial positioning to ' + updates.length + ' nodes (with jitter)');
+                    }
+                  };
+
+
+
+                  function _pearson(x, y) {
+                    var n = x.length;
+                    if (!n || y.length !== n) return NaN;
+                    var sx = 0, sy = 0;
+                    for (var i = 0; i < n; i++) { sx += x[i]; sy += y[i]; }
+                    var mx = sx / n, my = sy / n;
+                    var num = 0, dx = 0, dy = 0;
+                    for (var j = 0; j < n; j++) {
+                      var ax = x[j] - mx;
+                      var ay = y[j] - my;
+                      num += ax * ay;
+                      dx += ax * ax;
+                      dy += ay * ay;
+                    }
+                    if (dx === 0 || dy === 0) return NaN;
+                    return num / Math.sqrt(dx * dy);
+                  }
+
+                  function _rankAverageTies(vals) {
+                    var pairs = vals.map(function(v, i) { return { v: v, i: i }; });
+                    pairs.sort(function(a, b) { return a.v - b.v; });
+                    var ranks = new Array(vals.length);
+                    var p = 0;
+                    while (p < pairs.length) {
+                      var q = p;
+                      while (q + 1 < pairs.length && pairs[q + 1].v === pairs[p].v) q++;
+                      var avgRank = ((p + 1) + (q + 1)) / 2;
+                      for (var k = p; k <= q; k++) ranks[pairs[k].i] = avgRank;
+                      p = q + 1;
+                    }
+                    return ranks;
+                  }
+
+                  function _computeLayoutDiagnostics() {
+                    var positions = network.getPositions();
+                    var edgeObj = edges.get({ returnType: 'Object' });
+                    console.log('=== Layout Diagnostics ===');
+                    console.log('Total edges in DataSet:', Object.keys(edgeObj).length);
+                    
+                    var edgesWithPhysics = 0;
+                    var edgesWithoutPhysics = 0;
+                    for (var eid in edgeObj) {
+                      if (edgeObj[eid].physics === true) edgesWithPhysics++;
+                      else if (edgeObj[eid].physics === false) edgesWithoutPhysics++;
+                    }
+                    console.log('Edges with physics=true:', edgesWithPhysics);
+                    console.log('Edges with physics=false:', edgesWithoutPhysics);
+                    console.log('Edges with physics=undefined:', Object.keys(edgeObj).length - edgesWithPhysics - edgesWithoutPhysics);
+                    
+                    var w = [], d = [], l = [];
+                    for (var eid in edgeObj) {
+                      var e = edgeObj[eid];
+                      if (e.physics === false) continue;
+                      var p1 = positions[e.from], p2 = positions[e.to];
+                      if (!p1 || !p2) continue;
+                      var dx = p1.x - p2.x;
+                      var dy = p1.y - p2.y;
+                      var dist = Math.sqrt(dx * dx + dy * dy);
+                      var weight = e.weight !== undefined ? +e.weight : +e.value;
+                      var targetLen = e.length !== undefined ? +e.length : NaN;
+                      if (isNaN(weight) || isNaN(dist)) continue;
+                      w.push(weight);
+                      d.push(dist);
+                      l.push(targetLen);
+                    }
+                    console.log('Edges used in diagnostics (physics !== false && valid positions):', w.length);
+                    if (!w.length) {
+                      console.log('WARNING: No valid edges found for diagnostics');
+                      return null;
+                    }
+
+                    var sw = _rankAverageTies(w);
+                    var sd = _rankAverageTies(d);
+                    var spearman = _pearson(sw, sd); // should be negative
+
+                    var mae = 0, nMae = 0;
+                    for (var i = 0; i < l.length; i++) {
+                      if (!isNaN(l[i])) {
+                        mae += Math.abs(d[i] - l[i]);
+                        nMae += 1;
+                      }
+                    }
+                    mae = nMae ? (mae / nMae) : NaN;
+                    console.log('Spearman correlation:', spearman.toFixed(4));
+                    console.log('Mean Absolute Error:', mae.toFixed(2));
+                    return { spearman: spearman, mae: mae, n: w.length };
+                  }
+
+                  function _renderLayoutDiagnostics() {
+                    var panel = document.getElementById('layout-diagnostics');
+                    if (!panel) return;
+                    var m = _computeLayoutDiagnostics();
+                    if (!m) {
+                      panel.innerHTML = '<strong>Layout diagnostics</strong><br>No edges available.';
+                      return;
+                    }
+
+                    var sTxt = isNaN(m.spearman) ? 'N/A' : m.spearman.toFixed(4);
+                    var maeTxt = isNaN(m.mae) ? 'N/A' : m.mae.toFixed(2);
+                    var sColor = '#6c757d';
+                    if (!isNaN(m.spearman)) {
+                      if (m.spearman <= -0.70) sColor = '#1b7f3b';
+                      else if (m.spearman <= -0.40) sColor = '#b26a00';
+                      else sColor = '#b42318';
+                    }
+                    var maeColor = '#6c757d';
+                    if (!isNaN(m.mae)) {
+                      if (m.mae <= 120) maeColor = '#1b7f3b';
+                      else if (m.mae <= 220) maeColor = '#b26a00';
+                      else maeColor = '#b42318';
+                    }
+
+                    panel.innerHTML = '<strong>Layout diagnostics</strong>'
+                      + '<br>Spearman(weight vs distance): <strong style="color:' + sColor + '">' + sTxt + '</strong>'
+                      + '<br>MAE(target vs actual): <strong style="color:' + maeColor + '">' + maeTxt + '</strong>'
+                      + '<br>Physics edges: ' + m.n;
+                  }
+
+                  // Note: physics enabled/disabled is controlled by the
+                  // options passed into the network at creation time.
+
+                  {% if nodes|length > 100 and physics_enabled %}
+                      network.on("stabilizationProgress", function(params) {
+                          if (window._perChromosomeStartup) return;
+                          var loadingBar = document.getElementById('loadingBar');
+                          if (loadingBar) {
+                            loadingBar.style.display = 'block';
+                            loadingBar.style.opacity = 1;
+                          }
+                          var maxWidth = 496;
+                          var minWidth = 20;
+                          var widthFactor = params.iterations / params.total;
+                          var width = Math.max(minWidth, maxWidth * widthFactor);
+                          document.getElementById('bar').style.width = width + 'px';
+                          document.getElementById('text').innerHTML = Math.round(widthFactor * 100) + '%';
+                      });
+                      network.once("stabilizationIterationsDone", function() {
+                          if (window._perChromosomeStartup) return;
+                          var loadingBar = document.getElementById('loadingBar');
+                          document.getElementById('text').innerHTML = '100%';
+                          document.getElementById('bar').style.width = '496px';
+                          if (loadingBar) {
+                            loadingBar.style.opacity = 0;
+                            setTimeout(function () { loadingBar.style.display = 'none'; }, 500);
+                          }
+                          _renderLayoutDiagnostics();
+                          network.setOptions({ physics: false });
+                          // Apply default colormap after stabilization completes
+                          applyColorMode('tad', false);
+                      });
+                  {% endif %}
+
+                  // Rendered positions captured after first draw (populated below via afterDrawing)
+                  var _originalPositions = {};
+
+                  // Bulk-load all items now that the network is subscribed
+                  // If the server indicated this payload should be physics-solved
+                  // on the client, strip any baked x/y coordinates first to
+                  // avoid a visible flash of the presolved layout.
+                  var initialNodes = {{nodes|tojson}};
+                  // If the layout is already pre-solved, delete x/y to avoid a visible
+                  // flash of the presolved positions (physics is disabled anyway).
+                  // If physics will run, KEEP x/y as the Hilbert/Cantor initial positions.
+                  if (window.presolvedLayout) {
+                    initialNodes.forEach(function(n) {
+                      try {
+                        if (n.x !== undefined) delete n.x;
+                        if (n.y !== undefined) delete n.y;
+                        if (n.data && typeof n.data === 'object') {
+                          if (n.data.x !== undefined) delete n.data.x;
+                          if (n.data.y !== undefined) delete n.data.y;
+                        }
+                      } catch(e) {}
+                    });
+                  }
+                  // flush() fires exactly one update event per DataSet so the
+                  // network only redraws twice (nodes then edges) regardless of elements added
+                  nodes.add(initialNodes);
+                  nodes.flush();
+                  nodes.setOptions({queue: false});
+                  edges.add({{edges|tojson}});
+                  edges.flush();
+                  edges.setOptions({queue: false});
+
+                  // Restore physics to whatever the user configured
+                  var physicsWanted = options.physics && options.physics.enabled !== false;
+                  console.log('Physics wanted (from options):', physicsWanted);
+                  console.log('options.physics:', options.physics);
+                  if (!physicsWanted) {
+                      // Physics disabled; render diagnostics immediately.
+                      _renderLayoutDiagnostics();
+                    }
+
+                  // Populate helper look-ups used by filter / highlight code
+                  nodeColors = {};
+                  allNodes = nodes.get({ returnType: "Object" });
+
+                  // Auto-detect multi-chromosome data and apply spatial positioning if needed
+                  (function autoPositionIfMultiChromosome() {
+                    var chromSet = new Set();
+                    for (var nid in allNodes) {
+                      var chrom = allNodes[nid].chrom || allNodes[nid].chr;
+                      if (chrom) chromSet.add(chrom);
+                    }
+                    console.log('Unique chromosomes detected:', chromSet.size);
+                    // Note: We do NOT apply chromosome positioning here because
+                    // the Hilbert/Cantor layout from data.py provides excellent initial positions
+                    // that work well with physics. Just let physics solve from those positions.
+                    if (!physicsWanted) {
+                      // Physics disabled; render diagnostics with the Hilbert layout
+                      console.log('Physics disabled, rendering diagnostics with Hilbert layout');
+                      _renderLayoutDiagnostics();
+                    } else {
+                      console.log('Physics enabled, will solve from Hilbert layout positions');
+                    }
+                  })();
+
+                  // Populate gene search from all nodes at startup (genes pre-computed & deduplicated server-side)
+                  (function populateAllGenes() {
+                      var opts = [];
+                      var geneToNodes = {};  // For highlighting: gene -> [node_ids]
+                      var geneToRanges = {}; // For IGV report compatibility
+
+                      // Use cached deduplicated list if available, otherwise fallback to extracting from nodes
+                      if (typeof allUniqueGenes !== 'undefined' && Array.isArray(allUniqueGenes) && allUniqueGenes.length > 0) {
+                          // Fast path: use server-deduplicated genes
+                          allUniqueGenes.forEach(function(gene) {
+                              geneToNodes[gene] = [];
+                              geneToRanges[gene] = null;
+                          });
+                          // Build gene-to-node mappings and gene ranges
+                          for (var nid in allNodes) {
+                              var nd = allNodes[nid];
+                              if (!nd.genes) continue;
+                              String(nd.genes).split(',').forEach(function(sym) {
+                                  sym = sym.trim();
+                                  if (!sym) return;
+                                  if (!geneToNodes[sym]) {
+                                      geneToNodes[sym] = [];
+                                  }
+                                  geneToNodes[sym].push(nid);
+
+                                  var chrom = nd.chrom || nd.chr || 'chr1';
+                                  var start = typeof nd.startA === 'number' ? nd.startA : parseFloat(nd.startA) || 0;
+                                  var end = typeof nd.endA === 'number' ? nd.endA : parseFloat(nd.endA) || start;
+                                  var rangeMb = { chrom: chrom, start: start, end: end };
+                                  if (!geneToRanges[sym]) {
+                                      geneToRanges[sym] = rangeMb;
+                                  } else if (geneToRanges[sym].chrom === chrom) {
+                                      geneToRanges[sym].start = Math.min(geneToRanges[sym].start, rangeMb.start);
+                                      geneToRanges[sym].end = Math.max(geneToRanges[sym].end, rangeMb.end);
+                                  }
+                              });
+                          }
+                          // Build options
+                          allUniqueGenes.forEach(function(gene) {
+                              var range = geneToRanges[gene];
+                              var display = gene;
+                              if (range) {
+                                display = gene + ' : ' + (range.chrom || '') + ' : ' + formatMb(range.start) + ' - ' + formatMb(range.end);
+                              }
+                              opts.push({ value: gene, text: gene });
+                          });
+                      } else {
+                          // Fallback: extract and deduplicate from nodes
+                          var seen = {};
+                          for (var nid in allNodes) {
+                              var nd = allNodes[nid];
+                              if (!nd.genes) continue;
+                              String(nd.genes).split(',').forEach(function(sym) {
+                                  sym = sym.trim();
+                                  if (!sym) return;
+                                  if (!geneToNodes[sym]) {
+                                      geneToNodes[sym] = [];
+                                  }
+                                  geneToNodes[sym].push(nid);
+                                  if (!seen[sym]) {
+                                      seen[sym] = true;
+                                      var chrom = nd.chrom || nd.chr || 'chr1';
+                                      var start = typeof nd.startA === 'number' ? nd.startA : parseFloat(nd.startA) || 0;
+                                      var end = typeof nd.endA === 'number' ? nd.endA : parseFloat(nd.endA) || start;
+                                      var rangeMb = { chrom: chrom, start: start, end: end };
+                                      if (!geneToRanges[sym]) {
+                                          geneToRanges[sym] = rangeMb;
+                                      } else if (geneToRanges[sym].chrom === chrom) {
+                                          geneToRanges[sym].start = Math.min(geneToRanges[sym].start, rangeMb.start);
+                                          geneToRanges[sym].end = Math.max(geneToRanges[sym].end, rangeMb.end);
+                                      }
+                                      var display = sym;
+                                      if (geneToRanges[sym]) {
+                                        display = sym + ' : ' + (geneToRanges[sym].chrom || '') + ' : ' + formatMb(geneToRanges[sym].start) + ' - ' + formatMb(geneToRanges[sym].end);
+                                      }
+                                      opts.push({ value: sym, text: display });
+                                  }
+                              });
+                          }
+                      }
+                      
+                      window.geneToNodes = geneToNodes;
+                      window.geneToRanges = geneToRanges;
+                      _globalGeneOptions = opts;
+                      if (opts.length) {
+                          geneSearchControl.addOptions(opts);   // batch add
+                          geneSearchControl.refreshOptions(false);
+                      }
+                  })();
+
+                  for (nodeId in allNodes) {
+                    nodeColors[nodeId] = allNodes[nodeId].color;
+                  }
+                  allEdges = edges.get({ returnType: "Object" });
+
+                  // Annotation stats precomputation (min, max, mean, std for z-score scaling)
+                  var annotStats = {};
+                  (function() {
+                    var marks = annotationColumns.slice();
+                    // Always include node sizing column in statistics computation
+                    if (nodeSizingColumn && marks.indexOf(nodeSizingColumn) === -1) {
+                      marks.push(nodeSizingColumn);
+                    }
+                    marks = Array.from(new Set(marks));  // Remove duplicates
+                    marks.forEach(function(m) {
+                      var vals = [];
+                      for (var nid in allNodes) {
+                        var v = allNodes[nid][m];
+                        if (v !== null && v !== undefined && !isNaN(+v)) vals.push(parseFloat(v));
+                      }
+                      vals.sort(function(a,b){return a-b;});
+                      var n = vals.length;
+                      if (n) {
+                        var mean = vals.reduce(function(s,v){return s+v;}, 0) / n;
+                        var variance = n > 1
+                          ? vals.reduce(function(s,v){return s+(v-mean)*(v-mean);}, 0) / (n-1)
+                          : 1;
+                        var std = Math.sqrt(variance) || 1;
+                        annotStats[m] = {
+                          min: vals[0], max: vals[n-1],
+                          mean: mean, std: std
+                        };
+                      } else {
+                        annotStats[m] = { min: 0, max: 1, mean: 0.5, std: 1 };
+                      }
+                    });
+                  })();
+
+                  // Genomic coordinate bounds for coordinate mode (single gradient along chromosome bins)
+                  var coordStats = (function() {
+                    var vals = [];
+                    for (var nid in allNodes) {
+                      var s = allNodes[nid].startA;
+                      if (s !== null && s !== undefined && !isNaN(+s)) vals.push(+s);
+                    }
+                    vals.sort(function(a, b) { return a - b; });
+                    if (!vals.length) return { min: 0, max: 1 };
+                    return { min: vals[0], max: vals[vals.length - 1] };
+                  })();
+
+                  // Per-chromosome genomic coordinate bounds for coordinate mode
+                  var coordStatsByChrom = (function() {
+                    var stats = {};
+                    for (var nid in allNodes) {
+                      var nd = allNodes[nid];
+                      var chrom = nd.chrom || nd.chr || '(no chrom)';
+                      var s = nd.startA;
+                      if (s === null || s === undefined || isNaN(+s)) continue;
+                      s = +s;
+                      if (!stats[chrom]) {
+                        stats[chrom] = { min: s, max: s };
+                      } else {
+                        if (s < stats[chrom].min) stats[chrom].min = s;
+                        if (s > stats[chrom].max) stats[chrom].max = s;
+                      }
+                    }
+                    return stats;
+                  })();
+
+                  // Single-color coordinate gradient: #f7fbff (near-white) → #08306b (dark blue)
+                  function coordinateColor(startA, stats) {
+                    if (startA === null || startA === undefined || isNaN(+startA)) return '#cccccc';
+                    var range = (stats.max !== stats.min) ? (stats.max - stats.min) : 1;
+                    var t = Math.max(0, Math.min(1, (+startA - stats.min) / range));
+                    var r = Math.round(0xf7 + t * (0x08 - 0xf7));
+                    var g = Math.round(0xfb + t * (0x30 - 0xfb));
+                    var b = Math.round(0xff + t * (0x6b - 0xff));
+                    return 'rgb(' + r + ',' + g + ',' + b + ')';
+                  }
+
+                  // Blue → White → Red (z-score, clamped to ±σClamp)
+                  function heatmapColor(val, stats) {
+                    if (val === null || val === undefined) return '#cccccc';
+                    var clampEl = document.getElementById('sigma-clamp');
+                    var sigmaClamp = clampEl ? parseFloat(clampEl.value) : 3;
+                    var z = Math.max(-sigmaClamp, Math.min(sigmaClamp, (val - stats.mean) / stats.std));
+                    var r, g, b;
+                    if (z <= 0) {
+                      var t = (z + sigmaClamp) / sigmaClamp;  // 0 at -σ (blue), 1 at 0 (white)
+                      r = Math.round(t * 255);
+                      g = Math.round(t * 255);
+                      b = 255;
+                    } else {
+                      var t = z / sigmaClamp;                  // 0 at 0 (white), 1 at +σ (red)
+                      r = 255;
+                      g = Math.round((1 - t) * 255);
+                      b = Math.round((1 - t) * 255);
+                    }
+                    return 'rgb(' + r + ',' + g + ',' + b + ')';
+                  }
+
+                  // Linear gradient color with custom start/end colors
+                  function linearGradientColor(val, stats, colorStart, colorEnd) {
+                    if (val === null || val === undefined) return '#cccccc';
+                    var range = stats.max - stats.min || 1;
+                    var tLin = Math.max(0, Math.min(1, (val - stats.min) / range));
+                    var t = tLin;  // Linear interpolation
+                    
+                    // Parse hex colors to RGB
+                    var start = { r: parseInt(colorStart.substring(1, 3), 16), g: parseInt(colorStart.substring(3, 5), 16), b: parseInt(colorStart.substring(5, 7), 16) };
+                    var end = { r: parseInt(colorEnd.substring(1, 3), 16), g: parseInt(colorEnd.substring(3, 5), 16), b: parseInt(colorEnd.substring(5, 7), 16) };
+                    
+                    var r = Math.round(start.r + t * (end.r - start.r));
+                    var g = Math.round(start.g + t * (end.g - start.g));
+                    var b = Math.round(start.b + t * (end.b - start.b));
+                    return 'rgb(' + r + ',' + g + ',' + b + ')';
+                  }
+
+                  // Get color mode config for a specific column
+                  function getColorConfig(columnName) {
+                    if (!annotationConfig || !annotationConfig.annotations) return null;
+                    return annotationConfig.annotations[columnName];
+                  }
+
+                  // Apply node size scaling by percentile rank, mapped to MIN_SZ–MAX_SZ
+                  function applySizing() {
+                    var MIN_SZ = 12, MAX_SZ = 40;
+                    var sizingColumn = nodeSizingColumn;
+                    var sizeStats = annotStats[sizingColumn];
+
+                    if (!sizeStats) {
+                      // If sizing column not found, default all sizes
+                      var upd = [];
+                      for (var nid in allNodes) {
+                        allNodes[nid].size = 12;
+                        delete allNodes[nid].x; delete allNodes[nid].y;
+                        upd.push(allNodes[nid]);
+                      }
+                      nodes.update(upd);
+                      allNodes = nodes.get({ returnType: "Object" });
+                      return;
+                    }
+
+                    var values = [];
+                    for (var nid in allNodes) {
+                      var v = allNodes[nid][sizingColumn];
+                      if (v !== null && v !== undefined && !isNaN(+v)) {
+                        values.push({ id: nid, value: parseFloat(v) });
+                      }
+                    }
+                    values.sort(function (a, b) {
+                      return a.value - b.value || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+                    });
+
+                    var rankMap = {};
+                    var n = values.length;
+                    var i = 0;
+                    while (i < n) {
+                      var j = i + 1;
+                      while (j < n && values[j].value === values[i].value) {
+                        j++;
+                      }
+                      var percentile = n > 1 ? ((i + (j - 1)) / 2) / (n - 1) : 0;
+                      for (var k = i; k < j; k++) {
+                        rankMap[values[k].id] = percentile;
+                      }
+                      i = j;
+                    }
+
+                    var upd = [];
+                    for (var nid in allNodes) {
+                      var sz;
+                      if (rankMap.hasOwnProperty(nid)) {
+                        var pct = rankMap[nid];
+                        sz = MIN_SZ + pct * (MAX_SZ - MIN_SZ);
+                      } else {
+                        sz = MIN_SZ; // missing -> smallest size
+                      }
+                      allNodes[nid].size = sz;
+                      delete allNodes[nid].x; delete allNodes[nid].y;
+                      upd.push(allNodes[nid]);
+                    }
+                    nodes.update(upd);
+                    allNodes = nodes.get({ returnType: "Object" });
+                    updateLegend(currentColorMode);
+                  }
+
+                  window.reapplySizing = function reapplySizing() {
+                    applySizing();
+                  };
+
+                  // Initial sizing
+                  applySizing();
+
+                  // applyColorMode
+                  var currentColorMode = 'tad';
+                  function setColorClampVisibility(mode) {
+                    var clampLabel = document.getElementById('color-clamp-label');
+                    if (!clampLabel) return;
+                    if (selectedAnnotationColumns.indexOf(mode) !== -1) {
+                      var config = getColorConfig(mode);
+                      clampLabel.style.display = (config && config.color_mode === 'heatmap') ? 'inline-flex' : 'none';
+                    } else {
+                      clampLabel.style.display = 'none';
+                    }
+                  }
+
+                  window.applyColorMode = function applyColorMode(mode, preservePositions) {
+                    // Default to not preserving positions (let physics work)
+                    if (preservePositions === undefined) {
+                      preservePositions = false;
+                    }
+                    
+                    currentColorMode = mode;
+                    document.getElementById('tad-colormap-label').style.display = (mode === 'tad') ? 'inline-flex' : 'none';
+                    document.getElementById('coordinate-colormap-label').style.display = (mode === 'coordinate') ? 'inline-flex' : 'none';
+                    setColorClampVisibility(mode);
+                    
+                    // Update colormap selection if TAD mode
+                    if (mode === 'tad') {
+                      var colormapSelect = document.getElementById('tad-colormap');
+                      if (colormapSelect) {
+                        currentTadColormap = colormapSelect.value || currentTadColormap;
+                      }
+                      // Rebuild TAD panel with new colormap
+                      buildTadPanel();
+                    }
+                    
+                    // Update colormap selection if coordinate mode
+                    if (mode === 'coordinate') {
+                      var coordColormapSelect = document.getElementById('coordinate-colormap');
+                      if (coordColormapSelect) {
+                        currentCoordinateColormap = coordColormapSelect.value || currentCoordinateColormap;
+                      }
+                    }
+                    
+                    allNodes = nodes.get({ returnType: "Object" });
+                    var upd = [];
+                    for (var nid in allNodes) {
+                      var nd = allNodes[nid];
+                      // Save current x,y coordinates only if we're preserving positions
+                      var savedX = preservePositions ? nd.x : undefined;
+                      var savedY = preservePositions ? nd.y : undefined;
+                      var col;
+                      if (mode === 'tad') {
+                        // Use colormap-assigned color from TAD group
+                        var tadGroup = nd.group || 'Unassigned';
+                        col = (allTadColormapColors && allTadColormapColors[tadGroup]) ? allTadColormapColors[tadGroup] : (nd.baseColour || '#104b97');
+                      } else if (mode === 'coordinate') {
+                        if (nd.startA === null || nd.startA === undefined || isNaN(+nd.startA)) {
+                          col = '#cccccc';
+                        } else {
+                          var chrom = nd.chrom || nd.chr || '';
+                          var stats = coordStatsByChrom[chrom] || coordStats;
+                          var range = stats.max - stats.min || 1;
+                          var t = Math.max(0, Math.min(1, (+nd.startA - stats.min) / range));
+                          var colorstops = tadColormaps[currentCoordinateColormap] || tadColormaps['viridis'];
+                          col = interpolateGradient(t, colorstops);
+                        }
+                      } else if (mode === 'compartment' || (annotationConfig && annotationConfig.annotations && annotationConfig.annotations[mode] && annotationConfig.annotations[mode].color_mode === 'categorical')) {
+                        var compCfg = getColorConfig(mode);
+                        var _colA = (compCfg && compCfg.color_A) ? compCfg.color_A : '#e63946';
+                        var _colB = (compCfg && compCfg.color_B) ? compCfg.color_B : '#457b9d';
+                        var compVal = nd[mode];
+                        col = compVal === 'A' ? _colA
+                            : compVal === 'B' ? _colB
+                            : '#aaaaaa';
+                      } else if (selectedAnnotationColumns.indexOf(mode) !== -1) {
+                        // Dynamic annotation column
+                        var config = getColorConfig(mode);
+                        var stats = annotStats[mode];
+                        if (config && stats) {
+                          var colorMode = config.color_mode || 'linear';
+                          if (colorMode === 'heatmap') {
+                            col = heatmapColor(nd[mode], stats);
+                          } else {
+                            // linear gradient
+                            var colorStart = config.color_start || '#f7fbff';
+                            var colorEnd = config.color_end || '#08306b';
+                            col = linearGradientColor(nd[mode], stats, colorStart, colorEnd);
+                          }
+                        } else {
+                          col = '#cccccc';
+                        }
+                      } else {
+                        col = nd.baseColour || '#104b97';
+                      }
+                      nd.color = col;
+                      nodeColors[nid] = col;  // keep neighbourhoodHighlight in sync
+                      // Include position only if we're preserving coordinates
+                      var update = { id: nid, color: col };
+                      if (preservePositions && savedX !== undefined && savedY !== undefined) {
+                        update.x = savedX;
+                        update.y = savedY;
+                      }
+                      upd.push(update);
+                    }
+                    nodes.update(upd);
+                    allNodes = nodes.get({ returnType: "Object" });
+                    updateLegend(mode);
+                    // Refresh popup bold indicator when colour mode changes
+                    if (_popupNodeId) { buildMetadataPopup(_popupNodeId); }
+                  };
+
+                  // updateLegend
+                  function fmt(v) { return (v === null || v === undefined) ? 'N/A' : (v).toFixed(4); }
+                  
+                  // Exclude the node sizing annotation from selectable color modes
+                  if (nodeSizingColumn) {
+                    selectedAnnotationColumns = selectedAnnotationColumns.filter(function(col) {
+                      return col !== nodeSizingColumn;
+                    });
+                  }
+
+                  // Generate dynamic color mode radio buttons
+                  (function() {
+                    var container = document.getElementById('dynamic-color-modes');
+                    if (!container) return;
+                    if (!selectedAnnotationColumns || !selectedAnnotationColumns.length) return;
+                    
+                    var html = '';
+                    selectedAnnotationColumns.forEach(function(col) {
+                      var displayName = col;
+                      if (annotationConfig && annotationConfig.annotations && annotationConfig.annotations[col] && annotationConfig.annotations[col].display_name) {
+                        displayName = annotationConfig.annotations[col].display_name;
+                      }
+                      html += '<label style="white-space:nowrap;margin-left:8px"><input type="radio" name="colorMode" value="' + col + '" onchange="applyColorMode(this.value, true)"> ' + displayName + '</label>';
+                    });
+                    container.innerHTML = html;
+                  })();
+                  
+                  function updateLegend(mode) {
+                    var panel = document.getElementById('legend-panel');
+                    var html = '';
+
+                    if (mode === 'tad') {
+                      html += '<h4>TAD Cluster</h4>';
+                      html += '<div style="font-size:0.82em;color:#666;margin-bottom:8px">';
+                      var colormapSelect = document.getElementById('tad-colormap');
+                      if (colormapSelect) {
+                        html += 'Colormap: <strong>' + (colormapSelect.options[colormapSelect.selectedIndex].text || 'Default') + '</strong>';
+                      }
+                      html += '</div>';
+                      
+                      var chromCounts = {};
+                      for (var nid in allNodes) {
+                        var chrom = allNodes[nid].chrom || allNodes[nid].chr || '';
+                        chromCounts[chrom] = (chromCounts[chrom] || 0) + 1;
+                      }
+                      var chromKeys = Object.keys(chromCounts).sort(function(a,b) {
+                        if (a === '') return 1;
+                        if (b === '') return -1;
+                        return String(a).localeCompare(String(b));
+                      });
+                      if (chromKeys.length) {
+                        var previewChroms = chromKeys.slice(0, 10).map(function(ch) { return ch || '(no chrom)'; });
+                        var chromText = previewChroms.join(', ');
+                        if (chromKeys.length > 10) chromText += ', ...';
+                        html += '<div style="margin-bottom:8px;font-size:0.82em;color:#555">Chromosomes: <strong>' + chromKeys.length + '</strong> (' + chromText + ')</div>';
+                      }
+
+                      if (currentTadColormap === 'native') {
+                        html += '<div style="margin-bottom:8px;font-size:0.85em;color:#555">Using input base colours from JSON</div>';
+                      } else {
+                        // Show colormap gradient bar
+                        var colorstops = tadColormaps[currentTadColormap] || tadColormaps['viridis'];
+                        var gradientStops = colorstops.map(function(stop) {
+                          return stop.h + ' ' + Math.round(stop.pos * 100) + '%';
+                        }).join(', ');
+                        html += '<div style="height:20px;border-radius:3px;background:linear-gradient(90deg,' + gradientStops + ');border:1px solid #ccc;margin-bottom:8px"></div>';
+                      }
+                      
+                      var seen = {};
+                      for (var nid in allNodes) {
+                        var nd = allNodes[nid];
+                        var lbl = nd.group || 'Unassigned';
+                        if (!seen[lbl]) seen[lbl] = allTadColormapColors[lbl] || nd.baseColour || '#888';
+                      }
+                      var labels = Object.keys(seen).sort();
+                      var tadLabels = labels.filter(function(l) { return l !== 'Unassigned' && l !== 'Not clustered'; });
+                      var hasUnassigned = labels.some(function(l) { return l === 'Unassigned' || l === 'Not clustered'; });
+                      tadLabels.forEach(function(lbl) {
+                        html += '<div style="display:flex;align-items:center;gap:5px;margin:1px 0;font-size:0.80em">'
+                              +   '<span class="legend-swatch" style="background:' + seen[lbl] + ';flex-shrink:0"></span>'
+                              +   '<span>' + lbl + '</span>'
+                              + '</div>';
+                      });
+                      if (hasUnassigned) {
+                        html += '<div style="margin-top:4px;font-size:0.82em;color:#888"><span class="legend-swatch" style="background:#aaaaaa"></span>Unassigned</div>';
+                      }
+                      
+                    } else if (mode === 'coordinate') {
+                        html += '<h4>Genomic Coordinate</h4>';
+                        html += '<div style="font-size:0.82em;color:#666;margin-bottom:8px">';
+                        var coordColormapSelect = document.getElementById('coordinate-colormap');
+                        if (coordColormapSelect) {
+                          html += 'Colormap: <strong>' + (coordColormapSelect.options[coordColormapSelect.selectedIndex].text || 'Viridis') + '</strong>';
+                        }
+                        html += '</div>';
+                        // Show colormap gradient bar
+                        var colorstops = tadColormaps[currentCoordinateColormap] || tadColormaps['viridis'];
+                        var gradientStops = colorstops.map(function(stop) {
+                          return stop.h + ' ' + Math.round(stop.pos * 100) + '%';
+                        }).join(', ');
+                        html += '<div style="height:20px;border-radius:3px;background:linear-gradient(90deg,' + gradientStops + ');border:1px solid #ccc;margin-bottom:8px"></div>';
+                        var globalMin = formatMb(coordStats.min);
+                        var globalMax = formatMb(coordStats.max);
+                      html += '<div style="position:relative;height:18px;font-size:0.82em;color:#555">'
+                          +   '<span style="position:absolute;left:0">' + globalMin + '</span>'
+                          +   '<span style="position:absolute;right:0">' + globalMax + '</span>'
+                            + '</div>';
+                        html += '<div style="position:relative;height:14px;font-size:0.82em;color:#888;margin-top:2px">'
+                          +   '<span style="position:absolute;left:0">Start</span>'
+                          +   '<span style="position:absolute;right:0">End</span>'
+                          + '</div>';
+
+                        var chromKeys = Object.keys(coordStatsByChrom).sort(function(a,b) {
+                          if (a === '') return 1;
+                          if (b === '') return -1;
+                          return String(a).localeCompare(String(b));
+                        });
+                        if (chromKeys.length) {
+                          html += '<div style="margin-top:8px;font-size:0.82em;color:#666"><strong>' + chromKeys.length + ' chromosome' + (chromKeys.length === 1 ? '' : 's') + ':</strong></div>';
+                          chromKeys.forEach(function(chrom) {
+                            var stats = coordStatsByChrom[chrom];
+                            var count = 0;
+                            for (var nid in allNodes) {
+                              var nd = allNodes[nid];
+                              if ((nd.chrom || nd.chr || '') === chrom) count += 1;
+                            }
+                            html += '<div style="font-size:0.80em;color:#555;margin-top:2px">'
+                                + '<strong>' + (chrom || '(no chrom)') + ':</strong> '
+                                + formatMb(stats.min) + ' - ' + formatMb(stats.max)
+                                + ' (' + count + ' node' + (count === 1 ? '' : 's') + ')</div>';
+                          });
+                        }
+
+                    } else if (selectedAnnotationColumns.indexOf(mode) !== -1) {
+                    // Dynamic annotation column legend
+                    var config = getColorConfig(mode);
+                    var st = annotStats[mode];
+                    var colorMode = config ? (config.color_mode || 'linear') : 'linear';
+                    var displayMode = mode;
+                    if (annotationConfig && annotationConfig.annotations && annotationConfig.annotations[mode] && annotationConfig.annotations[mode].display_name) {
+                      displayMode = annotationConfig.annotations[mode].display_name;
+                    }
+
+                    html += '<h4>' + displayMode + '</h4>';
+
+                    if (colorMode === 'categorical') {
+                      // Compartment A/B two-swatch legend
+                      var compCfgL = config;
+                      var _lColA = (compCfgL && compCfgL.color_A) ? compCfgL.color_A : '#e63946';
+                      var _lColB = (compCfgL && compCfgL.color_B) ? compCfgL.color_B : '#457b9d';
+                      html += '<div><span class="legend-swatch" style="background:' + _lColA + '"></span>A</div>';
+                      html += '<div><span class="legend-swatch" style="background:' + _lColB + '"></span>B</div>';
+                      html += '<div style="margin-top:4px;font-size:0.82em;color:#888"><span class="legend-swatch" style="background:#aaaaaa"></span>No data</div>';
+                    } else if (colorMode === 'heatmap') {
+                      var clampEl = document.getElementById('sigma-clamp');
+                      var sigmaClamp = clampEl ? parseFloat(clampEl.value) : 3;
+                      var lo = fmt(st.mean - sigmaClamp * st.std);
+                      var hi = fmt(st.mean + sigmaClamp * st.std);
+                      html += '<div class="legend-gradient" style="background:linear-gradient(to right,#0000ff,#ffffff 50%,#ff0000)"></div>';
+                      html += '<div style="position:relative;height:18px;font-size:0.82em;color:#555">'
+                            +   '<span style="position:absolute;left:0">' + lo + '</span>'
+                            +   '<span style="position:absolute;left:50%;transform:translateX(-50%)">' + fmt(st.mean) + '</span>'
+                            +   '<span style="position:absolute;right:0">' + hi + '</span>'
+                            + '</div>';
+                      html += '<div style="position:relative;height:14px;font-size:0.82em;color:#888;margin-top:2px">'
+                            +   '<span style="position:absolute;left:0">−' + sigmaClamp + 'σ</span>'
+                            +   '<span style="position:absolute;left:50%;transform:translateX(-50%)">z=0</span>'
+                            +   '<span style="position:absolute;right:0">+' + sigmaClamp + 'σ</span>'
+                            + '</div>';
+                      html += '<div style="margin-top:20px;font-size:0.82em;color:#888"><span class="legend-swatch" style="background:#cccccc"></span>No data</div>';
+                    } else {
+                      // Linear gradient
+                      var colorStart = config ? (config.color_start || '#f7fbff') : '#f7fbff';
+                      var colorEnd = config ? (config.color_end || '#08306b') : '#08306b';
+                      html += '<div class="legend-gradient" style="background:linear-gradient(to right,' + colorStart + ',' + colorEnd + ')"></div>';
+                      if (st.min.isInteger && st.max.isInteger) {
+                        html += '<div style="position:relative;height:18px;font-size:0.82em;color:#555">'
+                              +   '<span style="position:absolute;left:0">' + fmt(st.min) + '</span>'
+                              +   '<span style="position:absolute;right:0">' + fmt(st.max) + '</span>'
+                              + '</div>';
+                      } else {
+                        html += '<div style="position:relative;height:18px;font-size:0.82em;color:#555">'
+                            +   '<span style="position:absolute;left:0">' + st.min + '</span>'
+                            +   '<span style="position:absolute;right:0">' + st.max + '</span>'
+                            + '</div>';
+                      }
+                      html += '<div style="margin-top:20px;font-size:0.82em;color:#888"><span class="legend-swatch" style="background:#cccccc"></span>No data</div>';
+                    }
+
+                    } else if (mode === 'compartment' || (annotationConfig && annotationConfig.annotations && annotationConfig.annotations[mode] && annotationConfig.annotations[mode].color_mode === 'categorical')) {
+                    var compCfgL = getColorConfig(mode);
+                    var _lColA = (compCfgL && compCfgL.color_A) ? compCfgL.color_A : '#e63946';
+                    var _lColB = (compCfgL && compCfgL.color_B) ? compCfgL.color_B : '#457b9d';
+                    var displayMode = mode;
+                    if (annotationConfig && annotationConfig.annotations && annotationConfig.annotations[mode] && annotationConfig.annotations[mode].display_name) {
+                      displayMode = annotationConfig.annotations[mode].display_name;
+                    }
+                    html += '<h4>' + displayMode + '</h4>';
+                    html += '<div><span class="legend-swatch" style="background:' + _lColA + '"></span>A</div>';
+                    html += '<div><span class="legend-swatch" style="background:' + _lColB + '"></span>B</div>';
+                    html += '<div style="margin-top:4px;font-size:0.82em;color:#888"><span class="legend-swatch" style="background:#aaaaaa"></span>No data</div>';
+                    }
+                    // Node size legend
+                    if (nodeSizingColumn) {
+                      var sizingColumn = nodeSizingColumn;
+                      var displaySizingColumn = sizingColumn;
+                      if (annotationConfig && annotationConfig.annotations && annotationConfig.annotations[sizingColumn] && annotationConfig.annotations[sizingColumn].display_name) {
+                        displaySizingColumn = annotationConfig.annotations[sizingColumn].display_name;
+                      }
+                      var sizeStats = annotStats[sizingColumn];
+                      if (sizeStats) {
+                        html += '<hr class="legend-divider">';
+                        html += '<h4>' + displaySizingColumn + ' (node size)</h4>';
+                        html += '<div class="legend-size-row">';
+                        html += '<svg width="40" height="30" style="overflow:visible">';
+                        html += '<circle cx="5" cy="21" r="3" fill="#777"/>';
+                        html += '<circle cx="30" cy="14" r="10" fill="#777"/>';
+                        html += '</svg>';
+                        html += '<div style="font-size:0.82em;color:#555">' + fmt(sizeStats.min) + '&nbsp;&rarr;&nbsp;' + fmt(sizeStats.max) + '<br><span style="color:#aaa;font-size:0.9em">(percentile scaling)</span></div>';
+                        html += '</div>';
+                      }
+                    }
+
+                    panel.innerHTML = html;
+                  }
+                  var _initLabels = [];
+                  allNodes = nodes.get({ returnType: "Object" });
+                  for (var _nid in allNodes) {
+                    if (allNodes[_nid].label !== undefined) {
+                      allNodes[_nid].hiddenLabel = allNodes[_nid].label;
+                      allNodes[_nid].label = undefined;
+                      // Labels are hidden but coordinates are preserved because:
+                      // - If presolved, physics is disabled and we use the solved positions
+                      // - If not presolved, physics will run and refine the Hilbert layout
+                      // We already deleted x/y earlier (at nodes load) if presolved,
+                      // so nothing to do here.
+                      _initLabels.push(allNodes[_nid]);
+                    }
+                  }
+                  nodes.update(_initLabels);
+                  allNodes = nodes.get({ returnType: "Object" });
+
+                  // Apply default TAD coloring (without position preservation before stabilization)
+                  applyColorMode('tad', false);
+
+                  // Capture node colors after initial coloring so we can lock them in during physics
+                  var lockedNodeColors = {};
+                  allNodes = nodes.get({ returnType: 'Object' });
+                  for (var nid in allNodes) {
+                    lockedNodeColors[nid] = allNodes[nid].color || '#cccccc';
+                  }
+
+                  // Initialize physics with simultaneous stabilization
+                  if (physicsWanted) {
+                      (function solveSimultaneous() {
+                        window._perChromosomeStartup = true;
+                        allNodes = nodes.get({ returnType: 'Object' });
+                        
+                        console.log('===== Physics Startup =====');
+                        console.log('Total nodes:', Object.keys(allNodes).length);
+                        
+                        // Diagnostic: Log initial node positions
+                        var initialPositions = network.getPositions();
+                        var sampleNodeIds = Object.keys(allNodes).slice(0, 3);
+                        console.log('Sample initial positions:', sampleNodeIds.map(id => ({
+                          id: id,
+                          x: initialPositions[id]?.x || 'undefined',
+                          y: initialPositions[id]?.y || 'undefined'
+                        })));
+
+                        // Show loading bar
+                        var loadingBar = document.getElementById('loadingBar');
+                        if (loadingBar) {
+                          loadingBar.style.display = 'block';
+                          loadingBar.style.opacity = 1;
+                        }
+
+                        // Enable physics
+                        network.setOptions({ physics: { enabled: true } });
+                        
+                        var allUpdates = [];
+                        for (var nid in allNodes) {
+                          allUpdates.push({
+                            id: nid,
+                            physics: true,
+                            color: lockedNodeColors[nid]
+                          });
+                        }
+                        nodes.update(allUpdates);
+                        console.log('Physics enabled for all nodes');
+                        
+                        // Diagnostic: Count edges with physics enabled
+                        var allEdgesSnap = edges.get({ returnType: 'Object' });
+                        var edgesWithPhysics = 0;
+                        for (var eid in allEdgesSnap) {
+                          if (allEdgesSnap[eid].physics === true) {
+                            edgesWithPhysics++;
+                          }
+                        }
+                        console.log('Total edges:', Object.keys(allEdgesSnap).length);
+                        console.log('Edges with physics=true:', edgesWithPhysics);
+                        
+                        // Log a sample edge
+                        var sampleEdgeId = Object.keys(allEdgesSnap)[0];
+                        if (sampleEdgeId) {
+                          console.log('Sample edge config:', allEdgesSnap[sampleEdgeId]);
+                        }
+
+                        // Track stabilization progress
+                        var stabilizationIterations = 0;
+                        var progressListener = function(params) {
+                          stabilizationIterations++;
+                          if (loadingBar) {
+                            var progress = params.iterations / params.total;
+                            var maxWidth = 496;
+                            var minWidth = 20;
+                            var width = Math.max(minWidth, maxWidth * progress);
+                            document.getElementById('bar').style.width = width + 'px';
+                            document.getElementById('text').innerHTML = Math.round(progress * 100) + '%';
+                          }
+                          // Log every 50 progress events or first 10
+                          if (stabilizationIterations % 50 === 0 || stabilizationIterations < 10) {
+                            console.log('stabilizationProgress event #' + stabilizationIterations + ': iterations=' + params.iterations + '/' + params.total);
+                          }
+                        };
+
+                        network.on('stabilizationProgress', progressListener);
+
+                        // When stabilization completes, freeze everything
+                        var stabilizationHandler = function() {
+                          network.off('stabilizationProgress', progressListener);
+                          console.log('===== Stabilization complete (total iterations: ' + stabilizationIterations + ') =====');
+                          
+                          // Diagnostic: Log final positions
+                          var finalPositions = network.getPositions();
+                          console.log('Sample final positions:', sampleNodeIds.map(id => ({
+                            id: id,
+                            x: finalPositions[id]?.x || 'undefined',
+                            y: finalPositions[id]?.y || 'undefined'
+                          })));
+                          
+                          // Check if positions actually changed
+                          var positionsChanged = 0;
+                          for (var i = 0; i < sampleNodeIds.length; i++) {
+                            var nid = sampleNodeIds[i];
+                            var initial = initialPositions[nid];
+                            var final = finalPositions[nid];
+                            if (initial && final && (initial.x !== final.x || initial.y !== final.y)) {
+                              positionsChanged++;
+                            }
+                          }
+                          console.log('Sample nodes with changed positions:', positionsChanged + '/' + sampleNodeIds.length);
+
+                          // Freeze all nodes
+                          var freezeUpdates = [];
+                          allNodes = nodes.get({ returnType: 'Object' });
+                          for (var nid in allNodes) {
+                            freezeUpdates.push({
+                              id: nid,
+                              physics: false,
+                              color: lockedNodeColors[nid]
+                            });
+                          }
+                          nodes.update(freezeUpdates);
+                          network.setOptions({ physics: { enabled: false } });
+
+                          // Hide loading bar
+                          if (loadingBar) {
+                            document.getElementById('text').innerHTML = '100%';
+                            document.getElementById('bar').style.width = '496px';
+                            loadingBar.style.opacity = 0;
+                            setTimeout(function() { loadingBar.style.display = 'none'; }, 500);
+                          }
+                          window._perChromosomeStartup = false;
+                          _renderLayoutDiagnostics();
+                        };
+
+                        network.on('stabilizationProgress', progressListener);
+                        network.once('stabilizationIterationsDone', function() {
+                          console.log('===== stabilizationIterationsDone event fired =====');
+                          stabilizationHandler();
+                        });
+
+                        // Start physics - let forceAtlas naturally repel nodes
+                        console.log('Starting physics stabilization with', Object.keys(allNodes).length, 'nodes...');
+                        network.stabilize();
+                      })();
+                  }
+
+                  // TAD Visibility Panel
+                  var hiddenTads = new Set();
+                  var hiddenChromosomes = new Set();
+
+                  function applyTadVisibility() {
+                    allNodes = nodes.get({ returnType: 'Object' });
+                    var upd = [];
+                    for (var nid in allNodes) {
+                      var nd = allNodes[nid];
+                      var grp = nd.group || 'Unassigned';
+                      var chrom = nd.chrom || nd.chr || '';
+                      var shouldHide = hiddenTads.has(grp) || hiddenChromosomes.has(chrom);
+                      if (!!nd.hidden !== shouldHide) {
+                        var entry = { id: nd.id, hidden: shouldHide };
+                        if (!shouldHide) {
+                          entry.color = nodeColors[nd.id] || nd.baseColour || '#aaaaaa';
+                        }
+                        upd.push(entry);
+                      }
+                    }
+                    if (upd.length) {
+                      nodes.update(upd);
+                      allNodes = nodes.get({ returnType: 'Object' });
+                    }
+                  }
+
+                  window.toggleTad = function(label, checked) {
+                    if (checked) { hiddenTads.delete(label); }
+                    else         { hiddenTads.add(label); }
+                    applyTadVisibility();
+                  };
+
+                  window.toggleChromosome = function(chrom, checked) {
+                    if (checked) { hiddenChromosomes.delete(chrom); }
+                    else         { hiddenChromosomes.add(chrom); }
+                    applyTadVisibility();
+                  };
+
+                  window.setAllTads = function(show) {
+                    hiddenTads.clear();
+                    hiddenChromosomes.clear();
+                    if (!show) {
+                      allNodes = nodes.get({ returnType: 'Object' });
+                      for (var nid in allNodes) {
+                        hiddenTads.add(allNodes[nid].group || 'Unassigned');
+                        hiddenChromosomes.add(allNodes[nid].chrom || allNodes[nid].chr || '');
+                      }
+                    }
+                    applyTadVisibility();
+                    document.querySelectorAll('#tad-panel input[type=checkbox]').forEach(function(cb) {
+                      cb.checked = show;
+                    });
+                  };
+
+                  function buildTadPanel() {
+                    var panel = document.getElementById('tad-panel');
+                    if (!panel) return;
+                    var tadMap = {}; // label -> base colour
+                    var chromMap = {}; // chrom -> Set(labels)
+                    allNodes = nodes.get({ returnType: 'Object' });
+                    for (var nid in allNodes) {
+                      var nd = allNodes[nid];
+                      var lbl = nd.group || 'Unassigned';
+                      var chrom = nd.chrom || nd.chr || '';
+                      if (!tadMap.hasOwnProperty(lbl)) tadMap[lbl] = nd.baseColour || '#aaaaaa';
+                      if (!chromMap[chrom]) chromMap[chrom] = new Set();
+                      chromMap[chrom].add(lbl);
+                    }
+
+                    var chromosomes = Object.keys(chromMap).sort(function(a,b){
+                      if (a === '') return 1;
+                      if (b === '') return -1;
+                      return String(a).localeCompare(String(b));
+                    });
+
+                    var orderedLabels = [];
+                    chromosomes.forEach(function(chrom) {
+                      var labelsForChrom = Array.from(chromMap[chrom]);
+                      labelsForChrom.sort(function(a,b){
+                        if (a === 'Unassigned') return 1;
+                        if (b === 'Unassigned') return -1;
+                        return a.localeCompare(b);
+                      });
+                      labelsForChrom.forEach(function(lbl){ orderedLabels.push(lbl); });
+                    });
+
+                    if (currentTadColormap === 'native') {
+                      allTadColormapColors = Object.assign({}, tadMap);
+                    } else {
+                      allTadColormapColors = assignTadColors(orderedLabels);
+                    }
+
+                    var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #dee2e6">'
+                      + '<strong style="font-size:0.9em;font-weight:600">TAD Visibility</strong>'
+                      + '<div style="display:flex;gap:4px">'
+                      + '<button onclick="setAllTads(true)" style="font-size:0.78em;padding:1px 6px;border:1px solid #ccc;border-radius:3px;background:#fff;cursor:pointer">All</button>'
+                      + '<button onclick="setAllTads(false)" style="font-size:0.78em;padding:1px 6px;border:1px solid #ccc;border-radius:3px;background:#fff;cursor:pointer">None</button>'
+                      + '</div></div>';
+
+                    chromosomes.forEach(function(chrom) {
+                      var chromId = 'chrom-chk-' + (chrom || 'none').replace(/[^a-z0-9]/gi, '_');
+                      var chromLabel = chrom || '(no chrom)';
+                      html += '<div style="margin-top:6px;padding-top:4px;border-top:1px dashed #eee">'
+                        + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">'
+                        + '<input type="checkbox" id="' + chromId + '" checked data-chrom="' + String(chrom).replace(/"/g,'&quot;') + '" onchange="toggleChromosome(this.dataset.chrom,this.checked)" style="cursor:pointer;flex-shrink:0">'
+                        + '<strong style="font-size:0.88em">' + chromLabel + '</strong>'
+                        + '</div>';
+
+                      var labelsForChrom = Array.from(chromMap[chrom]).sort(function(a,b){
+                        if (a === 'Unassigned') return 1;
+                        if (b === 'Unassigned') return -1;
+                        return a.localeCompare(b);
+                      });
+                      labelsForChrom.forEach(function(lbl) {
+                        var col = allTadColormapColors[lbl] || tadMap[lbl];
+                        var safeId = 'tad-chk-' + lbl.replace(/[^a-z0-9]/gi, '_');
+                        var escapedLbl = lbl.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+                        html += '<div style="display:flex;align-items:center;gap:5px;padding:2px 0 2px 12px">'
+                          + '<input type="checkbox" id="' + safeId + '" checked data-tad="' + escapedLbl + '" onchange="toggleTad(this.dataset.tad,this.checked)" style="cursor:pointer;flex-shrink:0">'
+                          + '<span style="width:11px;height:11px;border-radius:50%;background:' + col + ';display:inline-block;flex-shrink:0"></span>'
+                          + '<label for="' + safeId + '" style="margin:0;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escapedLbl + '">' + lbl + '</label>'
+                          + '</div>';
+                      });
+
+                      html += '</div>';
+                    });
+
+                    panel.innerHTML = html;
+                  }
+
+
+                  // Capture the fully-rendered positions once, after all init updates settle.
+                  network.once('afterDrawing', function() {
+                    var positions = network.getPositions();
+                    for (var nid in positions) {
+                      _originalPositions[nid] = { x: positions[nid].x, y: positions[nid].y };
+                    }
+                  });
+
+                  window.resetPositions = function() {
+                    var upd = [];
+                    allNodes = nodes.get({ returnType: 'Object' });
+                    for (var nid in allNodes) {
+                      var pos = _originalPositions[nid];
+                      if (pos) upd.push({ id: nid, x: pos.x, y: pos.y, color: nodeColors[nid] });
+                    }
+                    nodes.update(upd);
+                    network.fit();
+                  };
+
+                  // Function to get filtered node IDs based on current filter
+                  function getFilteredNodeIds(filter) {
+                    var selectedNodes = [];
+                    var selectedProp = filter['property'];
+                    var operator = filter['operator'] || 'eq';
+                    var filterValues = filter['value'];
+                    var allNodes = nodes.get({ returnType: "Object" });
+                    var isEdgeProp = selectedProp === 'weight' || selectedProp === 'genomic_dist_mb';
+
+                    if (isEdgeProp) {
+                      // For edge properties, return nodes connected to matching edges
+                      var selectedEdges = [];
+                      var allEdges = edges.get({ returnType: "Object" });
+                      for (var edgeId in allEdges) {
+                        var rawEdgeVal = allEdges[edgeId][selectedProp];
+                        if ((rawEdgeVal === null || rawEdgeVal === undefined) && selectedProp === 'weight') {
+                          rawEdgeVal = allEdges[edgeId].value;
+                        }
+                        if (rawEdgeVal === null || rawEdgeVal === undefined) continue;
+
+                        var edgeMatched = false;
+                        if (operator === 'eq') {
+                          edgeMatched = filterValues.includes(rawEdgeVal.toString());
+                        } else if (operator === 'gt' || operator === 'lt') {
+                          if (filterValues.length === 0) continue;
+                          var edgeThreshold = parseFloat(filterValues[0]);
+                          var edgeNumVal = parseFloat(rawEdgeVal);
+                          if (isNaN(edgeThreshold) || isNaN(edgeNumVal)) continue;
+                          edgeMatched = operator === 'gt' ? edgeNumVal > edgeThreshold : edgeNumVal < edgeThreshold;
+                        }
+
+                        if (edgeMatched) {
+                          selectedEdges.push(edgeId);
+                          // Add connected nodes
+                          var edge = allEdges[edgeId];
+                          if (!selectedNodes.includes(edge.from)) selectedNodes.push(edge.from);
+                          if (!selectedNodes.includes(edge.to)) selectedNodes.push(edge.to);
+                        }
+                      }
+                      return selectedNodes;
+                    }
+
+                    for (var nodeId in allNodes) {
+                      var rawVal = allNodes[nodeId][selectedProp];
+                      if (rawVal === null || rawVal === undefined) continue;
+
+                      var matched = false;
+                      if (operator === 'eq') {
+                        matched = filterValues.includes(rawVal.toString());
+                      } else if (operator === 'gt' || operator === 'lt') {
+                        if (filterValues.length === 0) continue;
+                        var threshold = parseFloat(filterValues[0]);
+                        var numVal = parseFloat(rawVal);
+                        if (isNaN(threshold) || isNaN(numVal)) continue;
+                        matched = operator === 'gt' ? numVal > threshold : numVal < threshold;
+                      }
+
+                      if (matched) selectedNodes.push(nodeId);
+                    }
+                    return selectedNodes;
+                  }
+
+                  function hilbertD2XY(nSide, d) {
+                    var x = 0;
+                    var y = 0;
+                    var t = d;
+                    var s = 1;
+                    while (s < nSide) {
+                      var rx = 1 & Math.floor(t / 2);
+                      var ry = 1 & (t ^ rx);
+                      if (ry === 0) {
+                        if (rx === 1) {
+                          x = s - 1 - x;
+                          y = s - 1 - y;
+                        }
+                        var tmp = x;
+                        x = y;
+                        y = tmp;
+                      }
+                      x += s * rx;
+                      y += s * ry;
+                      t = Math.floor(t / 4);
+                      s *= 2;
+                    }
+                    return [x, y];
+                  }
+
+                  function cantorMap01(u, depth) {
+                    u = Math.max(0, Math.min(1, u));
+                    var out = 0;
+                    var place = 1;
+                    for (var i = 0; i < depth; i++) {
+                      u *= 2;
+                      var bit = Math.floor(u);
+                      u -= bit;
+                      var digit = bit === 0 ? 0 : 2;
+                      place /= 3;
+                      out += digit * place;
+                    }
+                    return out;
+                  }
+
+                  function repositionFilteredNodesHilbert(filteredIds) {
+                    if (!filteredIds.length) return;
+
+                    allNodes = nodes.get({ returnType: 'Object' });
+                    var coords = filteredIds.map(function(id) {
+                      var node = allNodes[id] || { x: 0, y: 0 };
+                      return {
+                        id: id,
+                        x: node.x || 0,
+                        y: node.y || 0,
+                        startA: (typeof node.startA === 'number' ? node.startA : NaN)
+                      };
+                    });
+
+                    coords.sort(function(a, b) {
+                      if (!isNaN(a.startA) && !isNaN(b.startA) && a.startA !== b.startA) {
+                        return a.startA - b.startA;
+                      }
+                      if (a.x !== b.x) return a.x - b.x;
+                      return a.y - b.y;
+                    });
+
+                    var count = coords.length;
+                    var order = Math.max(1, Math.ceil(Math.log(count) / Math.log(4)));
+                    var nSide = Math.pow(2, order);
+                    var xScale = 2400;
+                    var yScale = 1600;
+                    var updates = [];
+
+                    for (var i = 0; i < count; i++) {
+                      var p = hilbertD2XY(nSide, i);
+                      var ux = nSide > 1 ? p[0] / (nSide - 1) : 0;
+                      var uy = nSide > 1 ? p[1] / (nSide - 1) : 0;
+                      updates.push({
+                        id: coords[i].id,
+                        x: cantorMap01(ux, 12) * xScale,
+                        y: cantorMap01(uy, 12) * yScale
+                      });
+                    }
+                    nodes.update(updates);
+                  }
+
+                  function repositionChromosomeNodesHilbert(filteredIds, xOffset, yOffset) {
+                    if (!filteredIds.length) return;
+
+                    allNodes = nodes.get({ returnType: 'Object' });
+                    var coords = filteredIds.map(function(id) {
+                      var node = allNodes[id] || { x: 0, y: 0 };
+                      return {
+                        id: id,
+                        x: node.x || 0,
+                        y: node.y || 0,
+                        startA: (typeof node.startA === 'number' ? node.startA : NaN)
+                      };
+                    });
+
+                    coords.sort(function(a, b) {
+                      if (!isNaN(a.startA) && !isNaN(b.startA) && a.startA !== b.startA) {
+                        return a.startA - b.startA;
+                      }
+                      if (a.x !== b.x) return a.x - b.x;
+                      return a.y - b.y;
+                    });
+
+                    var count = coords.length;
+                    var order = Math.max(1, Math.ceil(Math.log(count) / Math.log(4)));
+                    var nSide = Math.pow(2, order);
+                    var xScale = 900;
+                    var yScale = 900;
+                    var updates = [];
+
+                    for (var i = 0; i < count; i++) {
+                      var p = hilbertD2XY(nSide, i);
+                      var ux = nSide > 1 ? p[0] / (nSide - 1) : 0;
+                      var uy = nSide > 1 ? p[1] / (nSide - 1) : 0;
+                      updates.push({
+                        id: coords[i].id,
+                        x: xOffset + cantorMap01(ux, 12) * xScale,
+                        y: yOffset + cantorMap01(uy, 12) * yScale
+                      });
+                    }
+                    nodes.update(updates);
+                  }
+
+                  // Function to run physics on filtered nodes
+                  window.runPhysicsOnFiltered = function() {
+                    var filteredIds = getFilteredNodeIds(filter);
+                    if (filteredIds.length === 0) {
+                      alert('No nodes match the current filter.');
+                      return;
+                    }
+
+                    // Reposition filtered nodes into a new Hilbert curve layout
+                    repositionFilteredNodesHilbert(filteredIds);
+
+                    // Disable physics for all nodes
+                    var updates = [];
+                    allNodes = nodes.get({ returnType: "Object" });
+                    for (var nid in allNodes) {
+                      updates.push({ id: nid, physics: false });
+                    }
+                    nodes.update(updates);
+
+                    // Enable physics for filtered nodes
+                    updates = [];
+                    filteredIds.forEach(function(nid) {
+                      updates.push({ id: nid, physics: true });
+                    });
+                    nodes.update(updates);
+
+                    // Set up loading bar listeners
+                    var loadingBar = document.getElementById('loadingBar');
+                    if (loadingBar) {
+                      network.on("stabilizationProgress", function(params) {
+                        loadingBar.style.display = 'block';
+                        loadingBar.style.opacity = 1;
+                        var maxWidth = 496;
+                        var minWidth = 20;
+                        var widthFactor = params.iterations / params.total;
+                        var width = Math.max(minWidth, maxWidth * widthFactor);
+                        document.getElementById('bar').style.width = width + 'px';
+                        document.getElementById('text').innerHTML = Math.round(widthFactor * 100) + '%';
+                      });
+                      
+                      network.once("stabilizationIterationsDone", function() {
+                        document.getElementById('text').innerHTML = '100%';
+                        document.getElementById('bar').style.width = '496px';
+                        loadingBar.style.opacity = 0;
+                        setTimeout(function() {
+                          loadingBar.style.display = 'none';
+                        }, 500);
+                        
+                        // Re-enable physics for all nodes
+                        var updates = [];
+                        for (var nid in allNodes) {
+                          updates.push({ id: nid, physics: true });
+                        }
+                        nodes.update(updates);
+                        // Apply colormap without preserving positions - let physics settle determine final layout
+                        applyColorMode(currentColorMode, false);
+                      });
+                    } else {
+                      // Fallback if loading bar doesn't exist
+                      network.once('stabilizationIterationsDone', function() {
+                        var updates = [];
+                        for (var nid in allNodes) {
+                          updates.push({ id: nid, physics: true });
+                        }
+                        nodes.update(updates);
+                        // Apply colormap without preserving positions - let physics settle determine final layout
+                        applyColorMode(currentColorMode, false);
+                      });
+                    }
+
+                    // Run stabilization
+                    network.stabilize();
+                  };
+
+
+
+                  {% if filter_menu %}
+                  // Populate property dropdown with allowed properties (annotation columns + base filters)
+                    var _allowedProps = ['id', 'compartment', 'weight', 'genomic_dist_mb'].concat(annotationColumns);
+                    _allowedProps = Array.from(new Set(_allowedProps));  // Remove duplicates
+                  _allowedProps.forEach(function(p) {
+                      propControl.addOption({id: p, title: p});
+                  });
+                  {% endif %}
+
+                  {% if neighborhood_highlight %}
+                    network.on("click", neighbourhoodHighlight);
+                  {% endif %}
+
+                  // Track highlighted nodes from gene report so we can restore their state
+                  var _highlightedNodesState = {};  // Maps nodeId -> {color, borderWidth}
+
+                  // Clear highlighting and restore original node state
+                  window.clearIntervalHighlight = function() {
+                    if (Object.keys(_highlightedNodesState).length === 0) {
+                      return;  // Nothing to restore
+                    }
+                    var nodesToRestore = [];
+                    for (var nodeId in _highlightedNodesState) {
+                      var originalState = _highlightedNodesState[nodeId];
+                      nodesToRestore.push({
+                        id: nodeId,
+                        color: originalState.color,
+                        borderWidth: originalState.borderWidth
+                      });
+                    }
+                    nodes.update(nodesToRestore);
+                    _highlightedNodesState = {};  // Clear the tracking
+                    console.log('Cleared interval highlight');
+                  };
+
+                  // Listen for interval highlight messages from gene report pages
+                  window.addEventListener('message', function(event) {
+                    if (event.data && event.data.type === 'highlightInterval') {
+                      var interval = event.data;
+                      console.log('Received highlight interval message:', interval);
+                      highlightNodesInInterval(interval.chromosome, interval.start, interval.end);
+                    }
+                  });
+
+                  // Highlight nodes that fall within a genomic interval
+                  window.highlightNodesInInterval = function(chromosome, start, end) {
+                    // Clear any previous highlight first
+                    clearIntervalHighlight();
+                    
+                    allNodes = nodes.get({ returnType: "Object" });
+                    var nodesToHighlight = [];
+                    var highlightColor = '#ff6b6b';  // Red highlight color
+                    
+                    for (var nid in allNodes) {
+                      var nd = allNodes[nid];
+                      var nodeChrom = nd.chrom || nd.chr || '';
+                      
+                      // Check if node chromosome matches and position is in range
+                      if (nodeChrom.toString() === chromosome.toString()) {
+                        var nodeStart = nd.startA;
+                        var nodeEnd = nd.endA || nodeStart;
+                        
+                        // Highlight if node overlaps with the interval
+                        if (nodeStart !== null && nodeStart !== undefined && nodeEnd !== null && nodeEnd !== undefined) {
+                          var numStart = +nodeStart;
+                          var numEnd = +nodeEnd;
+                          // Check for overlap: start < interval_end AND end > interval_start
+                          if (numStart < end && numEnd > start) {
+                            // Store original state before highlighting
+                            _highlightedNodesState[nid] = {
+                              color: nd.color || nd.baseColour || '#104b97',
+                              borderWidth: nd.borderWidth || 1
+                            };
+                            nodesToHighlight.push({id: nid, color: highlightColor, borderWidth: 3});
+                          }
+                        }
+                      }
+                    }
+                    
+                    if (nodesToHighlight.length > 0) {
+                      nodes.update(nodesToHighlight);
+                      console.log('Highlighted ' + nodesToHighlight.length + ' nodes in interval ' + chromosome + ':' + start + '-' + end);
+                      
+                      // Optionally fit view to first highlighted node
+                      if (nodesToHighlight.length > 0) {
+                        var firstNodeId = nodesToHighlight[0].id;
+                        network.focus(firstNodeId, {scale: 1.5, animation: {duration: 800}});
+                      }
+                    } else {
+                      alert('No nodes found in interval ' + chromosome + ':' + start + '-' + end);
+                    }
+                  };
+
+                  // Clear interval highlight when clicking on empty canvas area
+                  network.on("click", function(params) {
+                    // params.nodes is empty when clicking on empty area (no node selected)
+                    // params.edges is empty when clicking on empty area (no edge selected)
+                    if (params.nodes.length === 0 && params.edges.length === 0) {
+                      if (Object.keys(_highlightedNodesState).length > 0) {
+                        clearIntervalHighlight();
+                      }
+                    }
+                  });
+
+                  {% if select_menu %}
+                    network.on("selectNode", neighbourhoodHighlight);
+                    // Sync the dropdown to reflect canvas selection/deselection.
+                    network.on("selectNode", function(params) {
+                      if (params.nodes.length > 0 && typeof selectNodeControl !== 'undefined') {
+                        selectNodeControl.setValue(params.nodes[0], true);
+                      }
+                      if (params.nodes.length > 0) {
+                        var selectedId = params.nodes[0];
+                        _popupNodeId = selectedId;
+                        buildMetadataPopup(selectedId);
+                        fetchGenesForNode(selectedId);
+                      }
+                    });
+                    network.on("deselectNode", function() {
+                      if (typeof selectNodeControl !== 'undefined') {
+                        selectNodeControl.setValue('', true);
+                      }
+                      _popupNodeId = null;
+                      _metadataPopup.style.display = 'none';
+                      clearGenePanel();
+                    });
+                  {% endif %}
+
+                  // Node metadata popup
+                  var _popupNodeId = null;
+                  window.setPopupNodeId = function(nodeId) {
+                    _popupNodeId = nodeId;
+                  };
+                  var _metadataPopup = document.createElement('div');
+                  _metadataPopup.style.cssText = [
+                    'display:none',
+                    'position:absolute',
+                    'top:14px',
+                    'right:14px',
+                    'background:rgba(255,255,255,0.97)',
+                    'border:1px solid #ccc',
+                    'border-radius:6px',
+                    'padding:12px 16px',
+                    'font-size:0.92em',
+                    'line-height:1.6',
+                    'min-width:200px',
+                    'pointer-events:none',
+                    'z-index:20',
+                    'box-shadow:2px 4px 12px rgba(0,0,0,0.15)'
+                  ].join(';');
+                  document.getElementById('mynetwork').appendChild(_metadataPopup);
+
+                  // Helper functions for metadata popup content
+                  function _fmtMetaVal(v) {
+                    if (v === null || v === undefined) return '<span style="color:#aaa">N/A</span>';
+                    if (typeof v === 'number') {
+                      return isNaN(v) ? '<span style="color:#aaa">N/A</span>' : v % 1===0 ? v.toFixed(0) : v.toFixed(4);
+                    }
+                    return String(v);
+                  }
+                  function _metaRow(label, val, bold) {
+                    var wt = bold ? 'font-weight:700' : 'font-weight:normal';
+                    return '<tr style="' + wt + '"><td style="color:#888;padding-right:10px;white-space:nowrap">'
+                      + label + '</td><td>' + val + '</td></tr>';
+                  }
+                  function buildMetadataPopup(nid) {
+                    var nd = allNodes[nid];
+                    if (!nd) return;
+                    var mode = currentColorMode;
+                    var group = nd.group || 'Unassigned';
+                    var colour = (allTadColormapColors && allTadColormapColors[group]) ? allTadColormapColors[group] : (nd.baseColour || '#104b97');
+                    var chrom = nd.chrom || nd.chr || '';
+                    var html = '';
+                    // Header block with chromosome and TAD cluster (distinct styling)
+                    html += '<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;padding:8px;border-radius:8px;background:#f6fbff;border:1px solid #e2f0ff">';
+                    html += '<div style="font-size:0.95em;color:#374151"><span style="color:#6b7280;margin-right:6px">Chromosome</span><span style="font-weight:700;color:#111">' + (chrom || 'N/A') + '</span></div>';
+                    html += '<div style="display:flex;align-items:center;gap:8px"><span style="color:#6b7280;margin-right:6px">TAD Cluster</span>'
+                         + '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:' + colour + ';border:1px solid rgba(0,0,0,0.06);"></span>'
+                         + '<span style="font-weight:600;color:#111">' + group + '</span></div>';
+                    html += '</div>';
+                    html += '<table style="border-collapse:collapse;width:100%;font-size:0.95em">';
+
+                    // Dynamically add rows for all annotation columns
+                    annotationColumns.forEach(function(col) {
+                      var val = nd[col];
+                      var formattedVal = _fmtMetaVal(val);
+                      var isBold = mode === col;
+                      // Use cleaned display name from annotationConfig if available
+                      var displayName = col;
+                      if (annotationConfig && annotationConfig.annotations && annotationConfig.annotations[col]) {
+                        displayName = annotationConfig.annotations[col].display_name || col;
+                      }
+                        html += _metaRow(displayName, formattedVal, isBold);
+                    });
+                    
+                    html += '</table>';
+                    _metadataPopup.innerHTML = html;
+                    _metadataPopup.style.display = 'block';
+                  }
+                  window.buildMetadataPopup = buildMetadataPopup;
+
+                  function sanitizeChromosome(chrom) {
+                    if (!chrom) return 'chr21';
+                    chrom = String(chrom);
+                    if (!/^chr/i.test(chrom)) {
+                      chrom = 'chr' + chrom;
+                    }
+                    return chrom;
+                  }
+
+                  function formatMb(bp) {
+                    return (bp / 1e6).toFixed(3) + ' Mb';
+                  }
+
+                  function clearGenePanel() {
+                      var body = document.getElementById('gene-panel-body');
+                      if (body) {
+                          body.innerHTML = '<div style="color:#666;">Select a node to load genes overlapping its genomic bin.</div>';
+                      }
+                      window._activeGeneSearchName = null;
+                      window._activeGeneFallbackNames = [];
+                      if (typeof geneSearchControl !== 'undefined') {
+                          geneSearchControl.clear();
+                          // Do NOT clearOptions() — global gene index must stay intact
+                      } else {
+                          var sel = document.getElementById('gene-search');
+                          if (sel) {
+                              sel.innerHTML = '<option value="">Search genes...</option>';
+                          }
+                      }
+                  }
+
+                  function setGeneSearchOptions(genes) {
+                    if (typeof geneSearchControl !== 'undefined') {
+                        geneSearchControl.clear();
+                    }
+                  }
+
+                  function openGeneReport(geneSpec) {
+                    if (!geneSpec) return;
+                    var geneName = geneSpec;
+                    var chrom = null;
+                    var start = null;
+                    var end = null;
+
+                    if (geneSpec.indexOf('|') !== -1) {
+                        var parts = geneSpec.split('|');
+                        geneName = decodeURIComponent(parts[0] || geneName);
+                        chrom = parts[1] ? decodeURIComponent(parts[1]) : null;
+                        start = parts[2] ? parseInt(parts[2], 10) : null;
+                        end = parts[3] ? parseInt(parts[3], 10) : null;
+                    }
+
+                    if ((!chrom || start === null || end === null) && window.geneToRanges && window.geneToRanges[geneName]) {
+                        var range = window.geneToRanges[geneName];
+                        chrom = range.chrom;
+                        start = Math.floor(range.start * 1e6);
+                        end = Math.ceil(range.end * 1e6);
+                    }
+                    if (!chrom || start === null || end === null) {
+                        return;
+                    }
+
+                    var reportUrl = '/gene_report?gene=' + encodeURIComponent(geneName)
+                              + '&chrom=' + encodeURIComponent(chrom)
+                              + '&start=' + encodeURIComponent(start)
+                              + '&end=' + encodeURIComponent(end)
+                              + '&genome=' + encodeURIComponent(window.selectedGenome || 'hg38');
+                    
+                    // Add token if available (for track uploads in gene report)
+                    if (typeof networkSessionToken !== 'undefined' && networkSessionToken) {
+                      reportUrl += '&token=' + encodeURIComponent(networkSessionToken);
+                    }
+                    
+                    window.open(reportUrl, '_blank');
+                  }
+                  window.openGeneReport = openGeneReport;
+
+                  window._activeGeneFallbackNames = [];
+                  window.setGeneFallbackLinks = function(geneNames) {
+                      var names = Array.isArray(geneNames) ? geneNames.slice() : [geneNames];
+                      names = names.map(function(name) {
+                          return name ? String(name).trim() : '';
+                      }).filter(function(name) {
+                          return name.length > 0;
+                      });
+                      window._activeGeneFallbackNames = Array.from(new Set(names));
+                  }
+
+                  function getUCSCGeneTrack(genome) {
+                      var trackMap = {
+                          hg38: 'knownGene',
+                          hg19: 'knownGene',
+                          mm10: 'knownGene',
+                          mm9: 'knownGene',
+                          mm39: 'knownGene',
+                          rn6: 'ensGene',
+                          ce11: 'ensGene',
+                          dm6: 'ensGene',
+                          sacCer3: 'ensGene',
+                          danRer10: 'ensGene',
+                          danRer11: 'ensGene'
+                      };
+                      return trackMap[genome] || null;
+                  }
+
+                  function getUCSCGenomeDb(genome) {
+                      var dbMap = {
+                          hg38: 'hg38',
+                          hg19: 'hg19',
+                          mm10: 'mm10',
+                          mm9: 'mm9',
+                          mm39: 'mm39',
+                          rn6: 'rn6',
+                          ce11: 'ce11',
+                          dm6: 'dm6',
+                          sacCer3: 'sacCer3',
+                          danRer10: 'danRer10',
+                          danRer11: 'danRer11'
+                      };
+                      return dbMap[genome] || 'hg38';
+                  }
+
+                  function parseUCSCTrackItem(item) {
+                      if (!item) return null;
+                      var symbol = item.geneName || item.name2 || item.name || item.geneName2;
+                      var start = item.chromStart != null ? item.chromStart : (item.txStart != null ? item.txStart : (item.start != null ? item.start : null));
+                      var end = item.chromEnd != null ? item.chromEnd : (item.txEnd != null ? item.txEnd : (item.end != null ? item.end : null));
+                      var chrom = item.chrom || item.chr || null;
+                      if (!symbol || start == null || end == null || !chrom) {
+                          return null;
+                      }
+                      return {
+                          symbol: symbol,
+                          start: start,
+                          end: end,
+                          chrom: chrom,
+                          strand: item.strand || null
+                      };
+                  }
+
+                  function buildGenePanel(genes, chrom, regionStart, regionEnd, fallbackNames) {
+                    var body = document.getElementById('gene-panel-body');
+                    if (!body) return;
+                    fallbackNames = fallbackNames || window._activeGeneFallbackNames || [];
+                    if ((!genes || !genes.length) && (!fallbackNames || !fallbackNames.length)) {
+                      body.innerHTML = '<div style="color:#666;">No annotated genes found in ' + sanitizeChromosome(chrom) + ':' + formatMb(regionStart) + '-' + formatMb(regionEnd) + '.</div>';
+                      setGeneSearchOptions([]);
+                      return;
+                    }
+                    var html = '';
+                    if (genes && genes.length) {
+                      html += '<div style="margin-bottom:10px;font-size:0.84em;color:#555">Genes overlapping ' + sanitizeChromosome(chrom) + ':' + formatMb(regionStart) + '-' + formatMb(regionEnd) + '</div>';
+                      genes.forEach(function(g) {
+                        html += '<div class="gene-row">'
+                              + '<div><a href="#" class="gene-link" onclick="openGeneReport(\'' + g.queryValue + '\');return false;">' + g.symbol + '</a></div>'
+                              + '<div class="gene-meta">' + formatMb(g.start) + ' – ' + formatMb(g.end) + '</div>'
+                              + '</div>';
+                      });
+                    } else {
+                      html += '<div style="color:#666;">No annotated genes found in ' + sanitizeChromosome(chrom) + ':' + formatMb(regionStart) + '-' + formatMb(regionEnd) + '.</div>';
+                    }
+                    if (fallbackNames && fallbackNames.length) {
+                      var ucscGenome = getUCSCGenomeDb(window.selectedGenome || 'hg38');
+                      html += '<div class="fallback-message" style="margin-top:12px;">These genes were not resolved by IGV. Open them directly in the UCSC Genome Browser:</div>';
+                      html += '<div class="fallback-links">';
+                      fallbackNames.forEach(function(name) {
+                        html += '<a class="fallback-link" href="https://genome.ucsc.edu/cgi-bin/hgTracks?db=' + ucscGenome + '&position=' + encodeURIComponent(name) + '" target="_blank" rel="noopener">' + name + '</a>';
+                      });
+                      html += '</div>';
+                    }
+                    body.innerHTML = html;
+                    setGeneSearchOptions(genes || []);
+                  }
+
+                  function fetchGenesForNode(nid) {
+                    var nd = allNodes[nid];
+                    if (!nd) {
+                      clearGenePanel();
+                      return;
+                    }
+                    var chrom = sanitizeChromosome(nd.chrom || nd.chr || nd.group || 'chr21');
+                    var startMb = nd.startA || nd.start || 0;
+                    var endMb = nd.endA || nd.end || startMb;
+                    var startBp = Math.max(0, Math.floor(startMb * 1e6));
+                    var endBp = Math.max(startBp + 1, Math.ceil(endMb * 1e6));
+                    var body = document.getElementById('gene-panel-body');
+                    if (body) {
+                      body.innerHTML = '<div style="color:#444;">Loading genes for ' + chrom + ':' + formatMb(startBp) + '-' + formatMb(endBp) + '…</div>';
+                    }
+                    var genome = window.selectedGenome || 'hg38';
+                    var track = getUCSCGeneTrack(genome);
+                    if (!track) {
+                      if (body) {
+                        body.innerHTML = '<div style="color:#a00;">Gene annotation lookup is not supported for genome ' + genome + '.</div>';
+                      }
+                      setGeneSearchOptions([]);
+                      return;
+                    }
+                    var url = 'https://api.genome.ucsc.edu/getData/track?genome=' + encodeURIComponent(genome)
+                              + ';track=' + encodeURIComponent(track)
+                              + ';chrom=' + encodeURIComponent(chrom)
+                              + ';start=' + startBp + ';end=' + endBp;
+                    fetch(url)
+                      .then(function(resp) { return resp.ok ? resp.json() : Promise.reject(resp.statusText); })
+                      .then(function(data) {
+                        var items = data[track] || [];
+                        var geneMap = {};
+                        items.forEach(function(item) {
+                          var parsed = parseUCSCTrackItem(item);
+                          if (!parsed) return;
+                          var symbol = parsed.symbol;
+                          var start = parsed.start;
+                          var end = parsed.end;
+                          if (!geneMap[symbol]) {
+                            geneMap[symbol] = { symbol: symbol, start: start, end: end, chrom: parsed.chrom, strand: parsed.strand };
+                          } else {
+                            geneMap[symbol].start = Math.min(geneMap[symbol].start, start);
+                            geneMap[symbol].end = Math.max(geneMap[symbol].end, end);
+                          }
+                        });
+                        var genes = Object.keys(geneMap).map(function(symbol) {
+                          var g = geneMap[symbol];
+                          return {
+                            symbol: g.symbol,
+                            chrom: g.chrom,
+                            start: g.start,
+                            end: g.end,
+                            nodeId: nid,
+                            queryValue: encodeURIComponent(g.symbol) + '|' + encodeURIComponent(g.chrom) + '|' + g.start + '|' + g.end + '|' + encodeURIComponent(nid),
+                            label: g.symbol + ' (' + formatMb(g.start) + '-' + formatMb(g.end) + ')'
+                          };
+                        });
+                        genes.sort(function(a, b) { return a.start - b.start; });
+
+                        var nodeGeneNames = [];
+                        if (nd && nd.genes) {
+                          nodeGeneNames = String(nd.genes).split(/[,;|]/).map(function(name) {
+                            return name ? name.trim() : '';
+                          }).filter(function(name) { return name.length > 0; });
+                        }
+                        var resolvedNames = new Set(genes.map(function(g) { return g.symbol; }));
+                        var fallbackNames = [];
+                        if (window._activeGeneSearchName) {
+                          var lookupName = String(window._activeGeneSearchName).trim();
+                          if (lookupName && !resolvedNames.has(lookupName)) {
+                            fallbackNames.push(lookupName);
+                          }
+                        }
+                        nodeGeneNames.forEach(function(name) {
+                          if (!resolvedNames.has(name) && fallbackNames.indexOf(name) === -1) {
+                            fallbackNames.push(name);
+                          }
+                        });
+                        window.setGeneFallbackLinks(fallbackNames);
+                        buildGenePanel(genes, chrom, startBp, endBp, fallbackNames);
+                      })
+                      .catch(function(error) {
+                        if (body) {
+                          body.innerHTML = '<div style="color:#a00;">Unable to load gene annotations: ' + String(error) + '</div>';
+                        }
+                        setGeneSearchOptions([]);
+                      });
+                  }
+                  window.fetchGenesForNode = fetchGenesForNode;
+
+                  network.on('click', function(params) {
+                    if (params.nodes.length > 0) {
+                      _popupNodeId = params.nodes[0];
+                      buildMetadataPopup(_popupNodeId);
+                      fetchGenesForNode(_popupNodeId);
+                    } else {
+                      _popupNodeId = null;
+                      _metadataPopup.style.display = 'none';
+                      clearGenePanel();
+                    }
+                  });
+                  
+                  {% if tooltip_link %}
+                  // make a custom popup
+                      var popup = document.createElement("div");
+                      popup.className = 'popup';
+                      popupTimeout = null;
+                      popup.addEventListener('mouseover', function () {
+                          console.log(popup)
+                          if (popupTimeout !== null) {
+                              clearTimeout(popupTimeout);
+                              popupTimeout = null;
+                          }
+                      });
+                      popup.addEventListener('mouseout', function () {
+                          if (popupTimeout === null) {
+                              hidePopup();
+                          }
+                      });
+                      container.appendChild(popup);
+
+
+                      // use the popup event to show
+                      network.on("showPopup", function (params) {
+                          showPopup(params);
+                      });
+
+                      // use the hide event to hide it
+                      network.on("hidePopup", function (params) {
+                          hidePopup();
+                      });
+
+                      // hiding the popup through css
+                      function hidePopup() {
+                          popupTimeout = setTimeout(function () { popup.style.display = 'none'; }, 500);
+                      }
+
+                      // showing the popup
+                      function showPopup(params) {
+                          var nodeId = params && params.node ? params.node : params;
+                          var nodeData = nodes.get([nodeId]);
+                          if (!nodeData || !nodeData[0]) return;
+                          var nd = nodeData[0];
+
+                          var title = nd.title || nd.label || nd.id || 'Node';
+                          var html = '<div style="font-weight:700;margin-bottom:6px">' + title + '</div>';
+                          if (annotationColumns && annotationColumns.length) {
+                            html += '<div style="font-size:0.9em;line-height:1.3;">';
+                            annotationColumns.forEach(function(col) {
+                              if (nd[col] === null || nd[col] === undefined) return;
+                              var displayName = col;
+                              if (annotationConfig && annotationConfig.annotations && annotationConfig.annotations[col] && annotationConfig.annotations[col].display_name) {
+                                displayName = annotationConfig.annotations[col].display_name;
+                              }
+                              // Skip redundant Compartment line
+                              if (displayName === 'Compartment') return;
+                              var displayVal = typeof nd[col] === 'number' ? nd[col].toFixed(4) : nd[col];
+                              html += '<div><strong>' + displayName + ':</strong> ' + displayVal + '</div>';
+                            });
+                            html += '</div>';
+                          } else {
+                            html += '<div style="font-size:0.9em;">' + (nd.title || '') + '</div>';
+                          }
+
+                          popup.innerHTML = html;
+
+                          // get the position of the node
+                          var posCanvas = network.getPositions([nodeId])[nodeId];
+
+                          // get the bounding box of the node
+                          var boundingBox = network.getBoundingBox(nodeId);
+
+                          //position tooltip:
+                          posCanvas.x = posCanvas.x + 0.5 * (boundingBox.right - boundingBox.left);
+
+                          // convert coordinates to the DOM space
+                          var posDOM = network.canvasToDOM(posCanvas);
+
+                          // Give it an offset
+                          posDOM.x += 10;
+                          posDOM.y -= 20;
+
+                          // show and place the tooltip.
+                          popup.style.display = 'block';
+                          popup.style.top = posDOM.y + 'px';
+                          popup.style.left = posDOM.x + 'px';
+                      }
+                  {% endif %}
+
+
+                  // Export: collect physics-solved positions and trigger download
+                  window.exportNetwork = function() {
+                    var positions = network.getPositions();
+                    var allNodesSnap = nodes.get({ returnType: 'Object' });
+                    var allEdgesSnap = edges.get({ returnType: 'Object' });
+
+                    var exportNodes = [];
+                    for (var nid in allNodesSnap) {
+                      var nd = allNodesSnap[nid];
+                      var pos = positions[nid] || {};
+                      exportNodes.push({ data: Object.assign({}, nd, { x: pos.x, y: pos.y }) });
+                    }
+
+                    var exportEdges = [];
+                    for (var eid in allEdgesSnap) {
+                      exportEdges.push({ data: Object.assign({}, allEdgesSnap[eid]) });
+                    }
+
+                    var payload = JSON.stringify({ nodes: exportNodes, edges: exportEdges, _physics_solved: true }, null, 2);
+                    var blob = new Blob([payload], { type: 'application/json' });
+                    var url = URL.createObjectURL(blob);
+                    var a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'network_export.json';
+                    document.body.appendChild(a);
+                    a.click();
+                    setTimeout(function() { URL.revokeObjectURL(url); a.remove(); }, 1000);
+                  };
+
+                  return network;
+
+              }
+              drawGraph();
+        </script>
+    </body>
+</html>
