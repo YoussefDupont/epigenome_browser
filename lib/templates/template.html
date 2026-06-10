@@ -1051,6 +1051,7 @@
 
                   // Rendered positions captured after first draw (populated below via afterDrawing)
                   var _originalPositions = {};
+                  var _intervalHighlightedIds = [];
 
                   // Bulk-load all items now that the network is subscribed
                   // If the server indicated this payload should be physics-solved
@@ -1736,8 +1737,6 @@
                       // Labels are hidden but coordinates are preserved because:
                       // - If presolved, physics is disabled and we use the solved positions
                       // - If not presolved, physics will run and refine the Hilbert layout
-                      // We already deleted x/y earlier (at nodes load) if presolved,
-                      // so nothing to do here.
                       _initLabels.push(allNodes[_nid]);
                     }
                   }
@@ -2349,57 +2348,66 @@
 
                   // Highlight nodes that fall within a genomic interval
                   window.highlightNodesInInterval = function(chromosome, start, end) {
-                    // Clear any previous highlight first
                     clearIntervalHighlight();
-                    
-                    allNodes = nodes.get({ returnType: "Object" });
+
+                    allNodes = nodes.get({ returnType: 'Object' });
+                    var matchedNodes = [];
                     var nodesToHighlight = [];
-                    var highlightColor = '#ff6b6b';  // Red highlight color
-                    
+                    var highlightColor = '#ff6b6b';
+
                     for (var nid in allNodes) {
                       var nd = allNodes[nid];
                       var nodeChrom = nd.chrom || nd.chr || '';
-                      
-                      // Check if node chromosome matches and position is in range
+
                       if (nodeChrom.toString() === chromosome.toString()) {
                         var nodeStart = nd.startA;
-                        var nodeEnd = nd.endA || nodeStart;
-                        
-                        // Highlight if node overlaps with the interval
+                        var nodeEnd = nd.endA !== undefined ? nd.endA : nodeStart;
+
                         if (nodeStart !== null && nodeStart !== undefined && nodeEnd !== null && nodeEnd !== undefined) {
                           var numStart = +nodeStart;
                           var numEnd = +nodeEnd;
-                          // Check for overlap: start < interval_end AND end > interval_start
                           if (numStart < end && numEnd > start) {
-                            // Store original state before highlighting
                             _highlightedNodesState[nid] = {
                               color: nd.color || nd.baseColour || '#104b97',
                               borderWidth: nd.borderWidth || 1
                             };
+                            matchedNodes.push(nid);
                             nodesToHighlight.push({id: nid, color: highlightColor, borderWidth: 3});
                           }
                         }
                       }
                     }
-                    
+
                     if (nodesToHighlight.length > 0) {
                       nodes.update(nodesToHighlight);
                       console.log('Highlighted ' + nodesToHighlight.length + ' nodes in interval ' + chromosome + ':' + start + '-' + end);
-                      
-                      // Optionally fit view to first highlighted node
-                      if (nodesToHighlight.length > 0) {
-                        var firstNodeId = nodesToHighlight[0].id;
-                        network.focus(firstNodeId, {scale: 1.5, animation: {duration: 800}});
-                      }
+                      network.focus(nodesToHighlight[0].id, {scale: 1.5, animation: {duration: 800}});
                     } else {
                       alert('No nodes found in interval ' + chromosome + ':' + start + '-' + end);
                     }
+
+                    window._intervalHighlightedIds = matchedNodes;
+
+                    // Show labels only on matched nodes
+                    allNodes = nodes.get({ returnType: 'Object' });
+                    var labelUpdates = [];
+                    for (var nid in allNodes) {
+                        var nd = allNodes[nid];
+                        if (matchedNodes.indexOf(nid) !== -1) {
+                            var lbl = nd.hiddenLabel !== undefined ? nd.hiddenLabel : nd.label;
+                            labelUpdates.push({ id: nid, label: lbl, hiddenLabel: undefined });
+                        } else {
+                            if (nd.label !== undefined) {
+                                labelUpdates.push({ id: nid, hiddenLabel: nd.label, label: undefined });
+                            }
+                        }
+                    }
+                    nodes.update(labelUpdates);
                   };
 
                   // Clear interval highlight when clicking on empty canvas area
                   network.on("click", function(params) {
                     // params.nodes is empty when clicking on empty area (no node selected)
-                    // params.edges is empty when clicking on empty area (no edge selected)
                     if (params.nodes.length === 0 && params.edges.length === 0) {
                       if (Object.keys(_highlightedNodesState).length > 0) {
                         clearIntervalHighlight();
@@ -2898,11 +2906,9 @@
                     a.click();
                     setTimeout(function() { URL.revokeObjectURL(url); a.remove(); }, 1000);
                   };
-
-                  return network;
-
-              }
-              drawGraph();
+                return network;
+            }
+          drawGraph();
         </script>
     </body>
 </html>

@@ -455,8 +455,7 @@ def upload():
             }
 
         # Check if this JSON was exported from the app (has _physics_solved flag).
-        # Only skip physics for explicitly-marked exports; everything else
-        # gets physics solving.
+        # Only skip physics for explicitly-marked exports
         is_export = bool(graph_data.get('_physics_solved'))
         with _sessions_lock:
             _sessions[token]['uploaded_json_is_export'] = is_export
