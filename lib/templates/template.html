@@ -1609,12 +1609,6 @@
                           return stop.h + ' ' + Math.round(stop.pos * 100) + '%';
                         }).join(', ');
                         html += '<div style="height:20px;border-radius:3px;background:linear-gradient(90deg,' + gradientStops + ');border:1px solid #ccc;margin-bottom:8px"></div>';
-                        var globalMin = formatMb(coordStats.min);
-                        var globalMax = formatMb(coordStats.max);
-                      html += '<div style="position:relative;height:18px;font-size:0.82em;color:#555">'
-                          +   '<span style="position:absolute;left:0">' + globalMin + '</span>'
-                          +   '<span style="position:absolute;right:0">' + globalMax + '</span>'
-                            + '</div>';
                         html += '<div style="position:relative;height:14px;font-size:0.82em;color:#888;margin-top:2px">'
                           +   '<span style="position:absolute;left:0">Start</span>'
                           +   '<span style="position:absolute;right:0">End</span>'
@@ -2519,8 +2513,9 @@
                     return chrom;
                   }
 
-                  function formatMb(bp) {
-                    return (bp / 1e6).toFixed(3) + ' Mb';
+                  function formatMb(val) {
+                    if (val === null || val === undefined || isNaN(+val)) return 'N/A';
+                    return (+val).toFixed(3) + ' Mb';
                   }
 
                   function clearGenePanel() {
@@ -2697,7 +2692,7 @@
                     var endBp = Math.max(startBp + 1, Math.ceil(endMb * 1e6));
                     var body = document.getElementById('gene-panel-body');
                     if (body) {
-                      body.innerHTML = '<div style="color:#444;">Loading genes for ' + chrom + ':' + formatMb(startBp) + '-' + formatMb(endBp) + '…</div>';
+                      body.innerHTML = '<div style="color:#444;">Loading genes for ' + chrom + ':' + formatMb(startMb) + '-' + formatMb(endMb) + '…</div>';
                     }
                     var genome = window.selectedGenome || 'hg38';
                     var track = getUCSCGeneTrack(genome);
@@ -2764,7 +2759,7 @@
                           }
                         });
                         window.setGeneFallbackLinks(fallbackNames);
-                        buildGenePanel(genes, chrom, startBp, endBp, fallbackNames);
+                        buildGenePanel(genes, chrom, startMb, endMb, fallbackNames);
                       })
                       .catch(function(error) {
                         if (body) {

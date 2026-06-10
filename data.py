@@ -29,7 +29,7 @@ def _hilbert_d2xy(n_side, d):
     return x, y
 
 
-def _cantor_map01(u, depth=12):
+def _cantor_map01_scalar(u, depth=12):
     u = min(max(float(u), 0.0), 1.0)
     out = 0.0
     place = 1.0
@@ -40,6 +40,28 @@ def _cantor_map01(u, depth=12):
         place /= 3.0
         out += (0 if bit == 0 else 2) * place
     return out
+
+
+def _cantor_map01_vec(u_arr: np.ndarray, depth: int = 12) -> np.ndarray:
+    """
+    Vectorized Cantor map.  Produces bit-identical results to the scalar
+    version for every value in [0, 1].  Operates on a 1-D float64 array
+    and returns a float64 array of the same shape.
+    """
+    u = np.clip(u_arr.astype(np.float64), 0.0, 1.0)
+    out = np.zeros_like(u)
+    place = 1.0
+    for _ in range(depth):
+        u *= 2.0
+        bits = u.astype(np.int64)
+        u -= bits.astype(np.float64)
+        place /= 3.0
+        out += np.where(bits == 0, 0.0, 2.0) * place
+    return out
+
+def _cantor_map01(u, depth=12):
+    #Thin wrapper: scalar input → scalar output (delegates to vectorized impl)
+    return float(_cantor_map01_vec(np.array([u], dtype=np.float64), depth=depth)[0])
 
 
 # Annotation detection helpers
@@ -463,23 +485,23 @@ def transform_data(file, bed_file, top_pct=100, max_degree=100,
     df['key0'] = df[['node', 'connection']].min(axis=1)
     df['key1'] = df[['node', 'connection']].max(axis=1)
     df['_base_eid'] = df['key0'] + '_' + df['key1']
-
-    df['_rank'] = df.groupby('_base_eid').cumcount()
-    df['edge_id'] = df['_base_eid'] + df['_rank'].apply(lambda x: f'_{x+1}' if x > 0 else '')
+    
+    rank = df.groupby('_base_eid').cumcount()  # 0-based rank per base edge id
+    df['edge_id'] = df['_base_eid'] + np.where(rank == 0, '', '_' + (rank + 1).astype(str))
 
     dist_mb = (df['startA'] - df['startB']).abs().round(3)
     edges_df = df[['edge_id', 'node', 'connection', 'weight']].copy()
     edges_df['genomic_dist_mb'] = dist_mb.values
 
     network_edges = {
-        row.edge_id: {'data': {
-            'id':              row.edge_id,
-            'source':         f"{row.node} Mb",
-            'target':         f"{row.connection} Mb",
-            'weight':         float(row.weight),
-            'genomic_dist_mb': float(row.genomic_dist_mb),
+        row['edge_id']: {'data': {
+            'id':               row['edge_id'],
+            'source':          f"{row['node']} Mb",
+            'target':          f"{row['connection']} Mb",
+            'weight':           float(row['weight']),
+            'genomic_dist_mb':  float(row['genomic_dist_mb']),
         }}
-        for row in edges_df.itertuples(index=False)
+        for row in edges_df.to_dict('records')
     }
 
     # 9. Degree cap
@@ -491,7 +513,7 @@ def transform_data(file, bed_file, top_pct=100, max_degree=100,
     kept = {
         eid
         for wlist in node_best.values()
-        for _, eid in sorted(wlist, reverse=True)[:max_degree]
+        for _, eid in sorted(wlist, key=lambda x: (x[0], x[1]), reverse=True)[:max_degree]
     }
     network_edges = {eid: e for eid, e in network_edges.items() if eid in kept}
     print(f"After degree cap (K={max_degree}): {len(network_edges)} edges")
@@ -533,11 +555,20 @@ def transform_data(file, bed_file, top_pct=100, max_degree=100,
         else:
             order  = max(1, int(math.ceil(math.log(n, 4))))
             n_side = 2 ** order
-            for idx, (_, _, nv) in enumerate(nodes_in_chrom):
-                gx, gy = _hilbert_d2xy(n_side, idx)
-                nv['data']['x'] = x_base + _cantor_map01(gx / float(n_side - 1)) * CELL_W
-                nv['data']['y'] = y_base + _cantor_map01(gy / float(n_side - 1)) * CELL_H
+            # Compute all Hilbert coordinates at once, then apply vectorized Cantor map.
 
+            gx_arr = np.empty(n, dtype=np.float64)
+            gy_arr = np.empty(n, dtype=np.float64)
+            for idx in range(n):
+                gx_arr[idx], gy_arr[idx] = _hilbert_d2xy(n_side, idx)
+
+            scale = float(n_side - 1)
+            cx = _cantor_map01_vec(gx_arr / scale) * CELL_W
+            cy = _cantor_map01_vec(gy_arr / scale) * CELL_H
+            
+            for idx, (_, _, nv) in enumerate(nodes_in_chrom):
+                nv['data']['x'] = float(x_base + cx[idx])
+                nv['data']['y'] = float(y_base + cy[idx])
     print(f"Hilbert layout: {n_chroms} chromosome(s) in a {cols}-column grid "
           f"(cell {CELL_W}x{CELL_H}, pad {PAD})")
 

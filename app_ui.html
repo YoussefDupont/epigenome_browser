@@ -18,6 +18,18 @@
     .solver-choice { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 1rem; }
     .solver-choice .form-check { margin: 0; }
     .solver-choice .solver-desc { font-size: 0.82em; color: #6c757d; margin-left: 1.6rem; margin-top: 0.1rem; }
+        /* Progress card */
+    #progress-card { display: none; }
+    .progress-stages { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.75rem; }
+    .stage-pill {
+      display: inline-flex; align-items: center; gap: 0.35rem;
+      padding: 0.25rem 0.65rem; border-radius: 999px; font-size: 0.8em; font-weight: 500;
+      background: #e9ecef; color: #6c757d; border: 1px solid transparent; transition: all .2s;
+    }
+    .stage-pill.active  { background: #cfe2ff; color: #0d6efd; border-color: #9ec5fe; }
+    .stage-pill.done    { background: #d1e7dd; color: #146c43; border-color: #a3cfbb; }
+    #progress-elapsed   { font-size: 0.8em; color: #6c757d; margin-bottom: 0.4rem; min-height: 1.2em; }
+    #progress-file-label { font-size: 0.8em; color: #6c757d; min-height: 1.2em; margin-top: 0.25rem; }
   </style>
 </head>
 <body>
@@ -77,6 +89,7 @@
             Clear Uploads
           </button>
           <span id="status-bar" class="text-muted"></span>
+          <span id="step1-elapsed-label" class="text-muted" style="font-size:0.88em;"></span>
           <button class="btn btn-outline-primary px-4 ms-auto" id="download-json-btn" type="button" style="display:none;">
             Download JSON
           </button>
@@ -84,7 +97,7 @@
       </form>
     </div>
   </div>
-
+  
   <!-- Chromosome selection card (for multi-chromosome uploads) -->
   <div class="card shadow-sm mb-4" id="chromosome-selection-section" style="display:none">
     <div class="card-body">
@@ -96,6 +109,26 @@
         <button class="btn btn-outline-secondary px-4" id="skip-chromosomes-btn">Skip (use all)</button>
       </div>
       <div style="margin-top:0.6rem; font-size:0.9rem; color:#374151;" id="chromosome-selection-status"></div>
+    </div>
+  </div>
+
+    <!-- Processing progress card -->
+  <div class="card shadow-sm mb-4" id="progress-card">
+    <div class="card-body">
+      <h5 class="card-title mb-3">Processing&#8230;</h5>
+      <div class="progress-stages">
+        <span class="stage-pill" id="stage-upload"><span class="pill-icon">&#9651; </span><span class="pill-label">Upload</span></span>
+        <span class="stage-pill" id="stage-parse"><span class="pill-icon">&#9651; </span><span class="pill-label">Parse</span></span>
+        <span class="stage-pill" id="stage-tad"><span class="pill-icon">&#9651; </span><span class="pill-label">TAD</span></span>
+        <span class="stage-pill" id="stage-layout"><span class="pill-icon">&#9651; </span><span class="pill-label">Layout</span></span>
+        <span class="stage-pill" id="stage-annot"><span class="pill-icon">&#9651; </span><span class="pill-label">Annotations</span></span>
+      </div>
+      <div id="progress-elapsed"></div>
+      <div class="progress" style="height:18px; border-radius:6px; overflow:hidden;">
+        <div class="progress-bar progress-bar-striped progress-bar-animated"
+             id="progress-bar" role="progressbar" style="width:0%; font-size:0.78em; line-height:18px;"></div>
+      </div>
+      <div id="progress-file-label"></div>
     </div>
   </div>
   
@@ -238,6 +271,8 @@
     // Reset status bar
     document.getElementById('status-bar').textContent = '';
     document.getElementById('status-bar').className = 'text-muted';
+    const step1LabelReset = document.getElementById('step1-elapsed-label');
+    if (step1LabelReset) step1LabelReset.textContent = '';
 
     // Reset 3D checkbox and hide its wrapper
     document.getElementById('json-3d-checkbox').checked = false;
@@ -271,6 +306,64 @@
     currentPlots = {};
     currentAnnotationStats = {};
     networkTab = null;
+
+    // Restore in-progress session after a page refresh
+    // If the user refreshed mid-processing, sessionStorage still holds the
+    // token and a 'processing' status flag.  Re-attach the poll loop so the
+    // progress bar reappears automatically.
+    (function restoreSession() {
+      const saved       = sessionStorage.getItem('pyvis_token');
+      const savedStatus = sessionStorage.getItem('pyvis_status');
+      if (!saved || savedStatus !== 'processing') return;
+
+      sessionToken = saved;
+      setStatus('Reconnecting to processing session\u2026', true);
+      showProgressCard();
+
+      pollUntilReady(saved)
+        .then(function(result) {
+          // Clear the saved flag — processing finished successfully
+          sessionStorage.removeItem('pyvis_status');
+
+          if (result.status === 'awaiting_chromosomes') {
+            renderChromosomeSelection(result.available_chromosomes);
+            document.getElementById('chromosome-selection-section').style.display = 'block';
+            setStatus('Chromosome scan complete. Please select chromosomes to include.', false);
+            toggleUploadBtn(false);
+            return;
+          }
+
+          uploadWasPrecomputedJson = result.is_physics_solved_export || false;
+          currentColumnTransformations = result.column_transformations || [];
+          currentDetectedAnnotations   = result.detected_annotations   || [];
+          currentAnnotationDefaults    = result.annotation_defaults    || {};
+          currentPlots                 = result.plots                  || {};
+          currentAnnotationStats       = result.annotation_stats       || {};
+          percentileTable              = result.percentile_table       || [];
+
+          document.getElementById('data-summary').textContent =
+            'Loaded ' + (result.total_nodes || 0).toLocaleString() +
+            ' nodes and ' + (result.total_edges || 0).toLocaleString() + ' edges objects.';
+
+          if (currentColumnTransformations.length > 0) {
+            renderColumnTransformations(currentColumnTransformations);
+            document.getElementById('column-review-section').style.display = 'block';
+            document.getElementById('plots-section').style.display = 'none';
+            setStatus('Please review and confirm column names.', false);
+          } else {
+            showDataAndNextSteps(result);
+            setStatus('', false);
+          }
+          updatePctInfo(100);
+          toggleUploadBtn(false);
+        })
+        .catch(function(err) {
+          sessionStorage.removeItem('pyvis_status');
+          sessionStorage.removeItem('pyvis_token');
+          setStatus('Reconnection failed: ' + err.message, false, true);
+          toggleUploadBtn(false);
+        });
+    })();
   });
 
   let sessionToken = null;
@@ -289,6 +382,7 @@
   let currentAnnotationStats = {};
 
   let networkTab = null;
+  let _totalElapsedSec = 0;
 
   const IGV_HOSTED_GENOMES = [
     { id: 'hg38', label: 'Human (GRCh38/hg38)' },
@@ -385,21 +479,132 @@
     document.getElementById('column-review-section').style.display = 'none';
     document.getElementById('chromosome-selection-section').style.display = 'none';
     document.getElementById('plots-section').style.display = 'none';
+    sessionStorage.removeItem('pyvis_token');
+    sessionStorage.removeItem('pyvis_status');
     networkTab = null;
+    const step1Label = document.getElementById('step1-elapsed-label');
+    if (step1Label) step1Label.textContent = '';
   });
 
-  async function pollUntilReady(token) {
-    let dots = 0;
-    while (true) {
-      await new Promise(r => setTimeout(r, 2000));
-      dots = (dots + 1) % 4;
-      setStatus('Processing data' + '.'.repeat(dots + 1) + ' (large files may take a minute)', true);
-      const pollResp = await fetch(`/upload_status/${token}`);
-      const polled = await pollResp.json();
-      if (polled.status === 'processing') continue;
-      if (polled.status === 'error') throw new Error(polled.error || 'Unknown error');
-      if (polled.status === 'awaiting_chromosomes') return polled;
-      return polled;
+
+  const STAGE_ORDER = ['upload', 'parse', 'tad', 'layout', 'annot'];
+  
+  function _setPillIcon(el, glyph) {
+    const icon = el.querySelector('.pill-icon');
+    if (icon) icon.textContent = glyph;
+  }
+
+  function showProgressCard(startStage) {
+    const card = document.getElementById('progress-card');
+    if (card) card.style.display = 'block';
+
+    const activeIdx = startStage ? STAGE_ORDER.indexOf(startStage) : 0;
+    STAGE_ORDER.forEach(function(key, idx) {
+      const el = document.getElementById('stage-' + key);
+      if (!el) return;
+      if (idx < activeIdx) {
+        el.className = 'stage-pill done';
+        _setPillIcon(el, '\u2713 ');
+      } else {
+        el.className = 'stage-pill';
+        _setPillIcon(el, '\u25b3 ');
+      }
+    });
+    const bar = document.getElementById('progress-bar');
+    if (bar) { bar.style.width = '0%'; bar.textContent = ''; bar.classList.add('progress-bar-animated'); }
+    const elapsed = document.getElementById('progress-elapsed');
+    if (elapsed) elapsed.textContent = '';
+    const fileLabel = document.getElementById('progress-file-label');
+    if (fileLabel) fileLabel.textContent = '';
+  }
+
+  function updateProgressCard(stage, pct, currentFile, totalFiles, elapsedSec) {
+    STAGE_ORDER.forEach(function(key) {
+      const el = document.getElementById('stage-' + key);
+      if (!el) return;
+      const idx    = STAGE_ORDER.indexOf(key);
+      const active = STAGE_ORDER.indexOf(stage);
+      if (idx < active) {
+        el.className = 'stage-pill done';
+        _setPillIcon(el, '\u2713 ');
+      } else if (idx === active) {
+        el.className = 'stage-pill active';
+        _setPillIcon(el, '\u25b6 ');
+      } else {
+        el.className = 'stage-pill';
+        _setPillIcon(el, '\u25b3 ');
+      }
+    });
+    const bar = document.getElementById('progress-bar');
+    if (bar) {
+      const w = pct != null ? pct : 0;
+      bar.style.width = w + '%';
+      bar.textContent = w > 8 ? w + '%' : '';
+    }
+    const elapsed = document.getElementById('progress-elapsed');
+    if (elapsed && elapsedSec != null) elapsed.textContent = 'Elapsed: ' + elapsedSec + 's';
+    const fileLabel = document.getElementById('progress-file-label');
+    if (fileLabel) {
+      if (currentFile && totalFiles) fileLabel.textContent = 'File ' + currentFile + ' of ' + totalFiles;
+      else fileLabel.textContent = '';
+    }
+  }
+
+  async function pollUntilReady(token, startStage) {
+    const effectiveStart = startStage || 'upload';
+    showProgressCard(effectiveStart);
+    updateProgressCard(effectiveStart, 5, null, null, 0);
+    setStatus('Processing\u2026', true);
+
+    let elapsedSec = 0;
+    const elapsedTimer = setInterval(function() {
+      elapsedSec++;
+      const el = document.getElementById('progress-elapsed');
+      if (el) el.textContent = 'Elapsed: ' + elapsedSec + 's';
+    }, 1000);
+
+    try {
+      while (true) {
+        await new Promise(r => setTimeout(r, 1800));
+        const pollResp = await fetch('/upload_status/' + token);
+        const polled   = await pollResp.json();
+
+        const stage       = polled.stage        || 'upload';
+        const pct         = polled.progress     != null ? polled.progress : null;
+        const currentFile = polled.current_file || null;
+        const totalFiles  = polled.total_files  || null;
+
+        updateProgressCard(stage, pct, currentFile, totalFiles, elapsedSec);
+        if (polled.detail) setStatus(polled.detail, true);
+
+        if (polled.status === 'processing') continue;
+        if (polled.status === 'error') {
+          clearInterval(elapsedTimer);
+          document.getElementById('progress-card').style.display = 'none';
+          throw new Error(polled.error || 'Unknown error');
+        }
+
+        // Done — fill all pills and bar to 100%
+        clearInterval(elapsedTimer);
+        STAGE_ORDER.forEach(function(key) {
+          const el = document.getElementById('stage-' + key);
+          if (el) {
+            el.className = 'stage-pill done';
+            _setPillIcon(el, '\u2713 ');
+          }
+        });
+        const bar = document.getElementById('progress-bar');
+        if (bar) { bar.style.width = '100%'; bar.textContent = '100%'; bar.classList.remove('progress-bar-animated'); }
+        await new Promise(r => setTimeout(r, 500));
+        document.getElementById('progress-card').style.display = 'none';
+        _totalElapsedSec += elapsedSec;
+        const step1Label = document.getElementById('step1-elapsed-label');
+        if (step1Label) step1Label.textContent = 'Completed in ' + _totalElapsedSec + 's';
+        return polled;
+      }
+    } catch(err) {
+      clearInterval(elapsedTimer);
+      throw err;
     }
   }
 
@@ -427,9 +632,15 @@
 
     uploadWasTsvBed = hasTsvBed && !hasJson;
     uploadWasJson = hasJson;
-    setStatus('Uploading and processing data…', true);
+    _totalElapsedSec = 0;
+    const step1LabelClear = document.getElementById('step1-elapsed-label');
+    if (step1LabelClear) step1LabelClear.textContent = '';   // ← ADD: clear stale label
+    setStatus('Uploading and processing data\u2026', true);
+    toggleUploadBtn(true);
+    setStatus('Uploading and processing data\u2026', true);
     toggleUploadBtn(true);
     networkTab = null;
+
 
     const fd = new FormData();
     if (jsonFile) {
@@ -457,13 +668,17 @@
 
       let result = initial;
       if (initial.status === 'processing') {
+        sessionStorage.setItem('pyvis_token', sessionToken);
+        sessionStorage.setItem('pyvis_status', 'processing');
         try {
           result = await pollUntilReady(sessionToken);
         } catch (err) {
+          sessionStorage.removeItem('pyvis_status');
           setStatus('Error: ' + err.message, false, true);
           toggleUploadBtn(false);
           return;
         }
+        sessionStorage.removeItem('pyvis_status');
       }
 
       if (result.error) {
@@ -530,6 +745,7 @@
       updatePctInfo(100);
 
     } catch (err) {
+      sessionStorage.removeItem('pyvis_status');
       setStatus('Upload failed: ' + err, false, true);
     }
     toggleUploadBtn(false);
@@ -564,7 +780,7 @@
       label.style.flex = '1';
       label.style.fontSize = '0.95em';
       label.innerHTML = '<code style="background:#f0f0f0; padding:2px 6px; border-radius:3px;">' + 
-        escapeHtml(original) + '</code> → <strong style="color:#059669;">' + escapeHtml(cleaned) + '</strong>';
+        escapeHtml(original) + '</code> \u2192 <strong style="color:#059669;">' + escapeHtml(cleaned) + '</strong>';
 
       const btn = document.createElement('button');
       btn.type = 'button';
@@ -678,7 +894,7 @@
       document.getElementById('chromosome-selection-status').textContent = 'Missing session token.';
       return;
     }
-    setStatus('Applying chromosome selection…', true);
+    setStatus('Applying chromosome selection\u2026', true);
     // Disable both buttons to prevent double submissions (keep card visible)
     disableAllProcessingButtons(true);
     try {
@@ -695,7 +911,7 @@
       }
       let result;
       try {
-        result = await pollUntilReady(sessionToken);
+        result = await pollUntilReady(sessionToken, 'parse');
       } catch (err) {
         setStatus('Error: ' + err.message, false, true);
         disableAllProcessingButtons(false);
@@ -747,7 +963,7 @@
       }
       let result;
       try {
-        result = await pollUntilReady(sessionToken);
+        result = await pollUntilReady(sessionToken, 'parse');
       } catch (err) {
         setStatus('Error: ' + err.message, false, true);
         disableAllProcessingButtons(false);
@@ -1000,7 +1216,7 @@
     const row = percentileTable.find(function(r) { return r.percentile === pct; })
              || percentileTable[percentileTable.length - 1];
     document.getElementById('pct-info').textContent =
-      `Weight threshold: ${row.threshold.toFixed(2)}  ·  Edges included: ${row.edge_count.toLocaleString()}`;
+      `Weight threshold: ${row.threshold.toFixed(2)}  \u00b7  Edges included: ${row.edge_count.toLocaleString()}`;
   }
 
   function renderGenomeSelector() {
@@ -1022,7 +1238,7 @@
     if (!select || !confirmation) return;
     selectedGenome = select.value || 'hg38';
     const genomeLabel = IGV_HOSTED_GENOMES.find(g => g.id === selectedGenome)?.label || selectedGenome;
-    confirmation.textContent = '✓ Genome selected successfully: ' + genomeLabel;
+    confirmation.textContent = '\u2713 Genome selected successfully: ' + genomeLabel;
     confirmation.style.color = '#059669';
     document.getElementById('percentile-section').style.display = 'block';
     
@@ -1052,7 +1268,7 @@
     if (networkTab && !networkTab.closed) {
       targetTab = networkTab;
       targetTab.document.open();
-      targetTab.document.write('<!doctype html><title>Building network...</title><body style="font-family:sans-serif;padding:16px">Rebuilding network, please wait…</body>');
+      targetTab.document.write('<!doctype html><title>Building network...</title><body style="font-family:sans-serif;padding:16px">Rebuilding network, please wait\u2026</body>');
       targetTab.document.close();
       targetTab.focus();
     } else {
@@ -1066,7 +1282,7 @@
     }
 
     setBuildStatus(true);
-    setStatus('Building network…', true);
+    setStatus('Building network\u2026', true);
 
     try {
       const resp = await fetch('/build_network', {
@@ -1300,7 +1516,7 @@
     const configStatus = document.getElementById('config-status-msg');
     configBtn.disabled = true;
     document.getElementById('config-spinner').classList.remove('d-none');
-    configStatus.textContent = 'Saving…';
+    configStatus.textContent = 'Saving\u2026';
     configStatus.style.color = '#555';
 
     try {
@@ -1312,16 +1528,16 @@
       const result = await resp.json();
       if (result.error) {
         configStatus.style.color = '#dc3545';
-        configStatus.textContent = '✗ Error: ' + result.error;
+        configStatus.textContent = '\u2717 Error: ' + result.error;
       } else {
         configStatus.style.color = 'green';
-        configStatus.textContent = '✓ Configuration saved';
+        configStatus.textContent = '\u2713 Configuration saved';
         renderGenomeSelector();
         setTimeout(() => { configStatus.textContent = ''; }, 3000);
       }
     } catch (err) {
       configStatus.style.color = '#dc3545';
-      configStatus.textContent = '✗ Save failed: ' + err;
+      configStatus.textContent = '\u2717 Save failed: ' + err;
     }
 
     configBtn.disabled = false;

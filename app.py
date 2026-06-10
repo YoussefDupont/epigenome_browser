@@ -25,6 +25,7 @@ import re
 import tempfile
 import threading
 import shutil
+import token
 import uuid
 from pathlib import Path
 import numpy as np
@@ -43,7 +44,7 @@ from pyvis_demo_no_physics import build_pyvis_from_json_data
 
 
 app = Flask(__name__, template_folder=str(workspace))
-app.config["MAX_CONTENT_LENGTH"] = 512 * 1024 * 1024  # 512 MB
+app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024 # 2GB max upload size
 
 # In-memory session store: token -> {"graph_data": ..., "network_html": ..., "network_html_lock": ...}
 _sessions: dict[str, dict] = {}
@@ -310,18 +311,37 @@ def _weight_percentile_table(graph_data: dict) -> list[dict]:
         result.append({"percentile": pct, "threshold": round(thresh, 6), "edge_count": count})
     return result
 
-def _scan_chromosomes(token, tsv_bytes_list):
+
+
+def _set_progress(token: str, stage: str, progress: int, **kwargs):
+    #Write progress fields to the session dict (must be called with _sessions_lock NOT held).
+    with _sessions_lock:
+        s = _sessions.get(token)
+        if s is None:
+            return
+        s["stage"] = stage
+        s["progress"] = progress
+        for k, v in kwargs.items():
+            s[k] = v
+
+
+def _scan_chromosomes(token):
     """
     Phase 1 (fast): read only the first chrom column of each TSV to detect
-    unique chromosome values. Stores result in session and either:
+    unique chromosome values. Reads directly from _tsv_paths on disk stores result in sesion and either:
       - sets status='awaiting_chromosomes' (>1 chrom found, user must choose), or
       - kicks off the full build immediately (0-1 chrom found).
     """
     try:
+        with _sessions_lock:
+            tsv_paths = list(_sessions[token]['_tsv_paths'])
+
+        _set_progress(token, "upload", 5)
+
         dfs = []
-        for b in tsv_bytes_list:
+        for path in tsv_paths:
             chunk = pd.read_csv(
-                io.BytesIO(b), sep='\t', usecols=[0],
+                path, sep='\t', usecols=[0],
                 low_memory=False, header=0
             )
             dfs.append(chunk)
@@ -331,18 +351,22 @@ def _scan_chromosomes(token, tsv_bytes_list):
             set(_normalize_chrom_series(merged[raw_col].dropna().astype(str)))
             - {'', 'nan'}
         )
+
         with _sessions_lock:
             s = _sessions[token]
             s['available_chromosomes'] = chroms
-            if len(chroms) <= 1:
-                # Only one chrom (or none) — start full build immediately
-                _kick_off_tsv_build(token, chromosomes=None)
-            else:
+            if len(chroms) > 1:
                 s['status'] = 'awaiting_chromosomes'
+                s['stage']  = 'upload'
+                s['progress'] = 10
+
+        if len(chroms) <= 1:
+            _kick_off_tsv_build(token, chromosomes=None)
+
     except Exception as exc:
         with _sessions_lock:
             _sessions[token]['status'] = 'error'
-            _sessions[token]['error'] = str(exc)
+            _sessions[token]['error']  = str(exc)
 
 
 def _kick_off_tsv_build(token, chromosomes=None):
@@ -353,8 +377,8 @@ def _kick_off_tsv_build(token, chromosomes=None):
         target=_process_tsv_upload,
         args=(
             token,
-            session['_tsv_bytes'],
-            session['_bed_bytes'],
+            session['_tsv_paths'],
+            session['_bed_paths'],
             session.get('_max_degree', 35),
             chromosomes,
         ),
@@ -424,6 +448,10 @@ def upload():
                 "annotation_stats": None,
                 "pct_table": None,
                 "column_transformations": None,
+                "stage": "done",
+                "progress": 100,
+                "file_index": None,
+                "file_count": None,
             }
 
         # Check if this JSON was exported from the app (has _physics_solved flag).
@@ -456,18 +484,32 @@ def upload():
                                           available_chromosomes, is_tsv=False, is_export=is_export)
         return jsonify(response)
 
-    # TSV + BED upload path (async)
+    # # TSV + BED upload path (async) and stream files to disk immediately so they are never held as byte buffers in memory
     tsv_files = [f for f in tsv_files if f and f.filename]
     bed_files = [f for f in bed_files if f and f.filename]
 
     if not tsv_files or not bed_files:
         return jsonify({"error": "Provide either a JSON file, or both TSV and BED files."}), 400
 
+    # Write each uploaded file to a dedicated temp directory for this session
+    upload_tmpdir = tempfile.mkdtemp(prefix="pyvis_upload_")
     try:
-        tsv_bytes = [f.stream.read() for f in tsv_files]
-        bed_bytes = [f.stream.read() for f in bed_files]
+        tsv_paths = []
+        for i, f in enumerate(tsv_files):
+            safe_name = f"tsv_{i}_{Path(f.filename).name}"
+            dest = os.path.join(upload_tmpdir, safe_name)
+            f.save(dest)
+            tsv_paths.append(dest)
+
+        bed_paths = []
+        for i, f in enumerate(bed_files):
+            safe_name = f"bed_{i}_{Path(f.filename).name}"
+            dest = os.path.join(upload_tmpdir, safe_name)
+            f.save(dest)
+            bed_paths.append(dest)
     except Exception as exc:
-        return jsonify({"error": f"Failed to read uploaded files: {exc}"}), 400
+        shutil.rmtree(upload_tmpdir, ignore_errors=True)
+        return jsonify({"error": f"Failed to save uploaded files: {exc}"}), 400
 
     token = str(uuid.uuid4())
     with _sessions_lock:
@@ -485,14 +527,19 @@ def upload():
             "annotation_stats": None,
             "pct_table": None,
             "column_transformations": None,
-            "_tsv_bytes": tsv_bytes,
-            "_bed_bytes": bed_bytes,
+            "_tsv_paths": tsv_paths,
+            "_bed_paths": bed_paths,
+            "_upload_tmpdir": upload_tmpdir,
             "_max_degree": max_degree,
+            "stage": "scanning",
+            "progress": 0,
+            "file_index": None,
+            "file_count": len(tsv_paths),
         }
 
     t = threading.Thread(
         target=_scan_chromosomes,
-        args=(token, tsv_bytes),
+        args=(token,),
         daemon=True,
     )
     t.start()
@@ -512,7 +559,7 @@ def select_chromosomes():
         return jsonify({"error": "Unknown session token"}), 404
     
     # Handle JSON uploads: filter graph_data by selected chromosomes
-    if "graph_data" in session and "_tsv_bytes" not in session:
+    if "graph_data" in session and "_tsv_paths" not in session:
         graph_data = session["graph_data"]
         
         # If chromosomes selected, filter nodes and edges
@@ -577,7 +624,7 @@ def select_chromosomes():
         return jsonify(response)
     
     # Handle TSV+BED uploads: kick off background processing
-    if "_tsv_bytes" not in session or "_bed_bytes" not in session:
+    if "_tsv_paths" not in session:
         return jsonify({
             "error": "Session is missing uploaded file data. Please re-upload your files."
             }), 400
@@ -767,25 +814,33 @@ def _build_upload_response(token, graph_data, plots, annotation_stats,
         response["is_tsv_upload"] = True
     return response
 
-
-def _process_tsv_upload(token, tsv_bytes_list, bed_bytes_list, max_degree,
-                        chromosomes=None):
-    """Background worker: parse TSV+BED, build graph, compute plots, store in session."""
+def _process_tsv_upload(token, tsv_paths, bed_paths, max_degree, chromosomes=None):
+    #Background worker: merge TSV+BED files from disk, build graph, compute plots
     tmpdir = tempfile.mkdtemp()
     try:
+        file_count = len(tsv_paths)
+        # Stage: merging
+        _set_progress(token, "parse", 15, file_index=0, file_count=file_count)
         tsv_path = os.path.join(tmpdir, "merged_input.tsv")
         bed_path = os.path.join(tmpdir, "merged_input.bed")
 
-        tsv_dfs = [pd.read_csv(io.BytesIO(b), sep='\t', low_memory=False) for b in tsv_bytes_list]
+        tsv_dfs = []
+        for i, p in enumerate(tsv_paths):
+            _set_progress(token, "parse", 15 + int(20 * (i / file_count)), 
+                          file_index=i+1, file_count=file_count)
+            tsv_dfs.append(pd.read_csv(p, sep='\t', low_memory=False))
         merged_tsv = pd.concat(tsv_dfs, ignore_index=True)
         merged_tsv.to_csv(tsv_path, sep='\t', index=False)
 
         bed_lines = []
-        for b in bed_bytes_list:
-            bed_lines.extend(b.decode('utf-8').strip().split('\n'))
-        with open(bed_path, 'w') as f:
-            f.write('\n'.join(bed_lines))
+        for p in bed_paths:
+            with open(p, 'r', encoding='utf-8') as fh:
+                bed_lines.extend(fh.read().strip().split('\n'))
+        with open(bed_path, 'w', encoding='utf-8') as fh:
+            fh.write('\n'.join(bed_lines))
 
+        # Stage: building
+        _set_progress(token, "tad", 40, file_index=None, file_count=file_count)
         try:
             detected_annotations = detect_annotation_columns(tsv_path)
             detected_annotations = [re.sub(r'_1$', '', col) for col in detected_annotations]
@@ -812,6 +867,8 @@ def _process_tsv_upload(token, tsv_bytes_list, bed_bytes_list, max_degree,
             if ((n.get('data') or n).get('chrom') is not None)
         })
 
+        #Stage: plotting
+        _set_progress(token, "annot", 75, file_index=None, file_count=file_count)
         plots = _make_distribution_plots(graph_data, annotation_columns=detected_annotations)
         annotation_stats = _compute_annotation_stats(graph_data, detected_annotations)
         pct_table = _weight_percentile_table(graph_data)
@@ -821,9 +878,13 @@ def _process_tsv_upload(token, tsv_bytes_list, bed_bytes_list, max_degree,
             for col in detected_annotations
         ]
 
+        # Stage: done
         with _sessions_lock:
             session = _sessions[token]
             session["status"] = "ready"
+            session["stage"] = "done"
+            session["progress"] = 100
+            session["file_index"] = None
             session["graph_data"] = graph_data
             session["annotation_config"] = annotation_config
             session["detected_annotations"] = detected_annotations
@@ -841,7 +902,13 @@ def _process_tsv_upload(token, tsv_bytes_list, bed_bytes_list, max_degree,
             _sessions[token]["status"] = "error"
             _sessions[token]["error"] = str(exc)
     finally:
+        # Clean up temp files for this upload session
         shutil.rmtree(tmpdir, ignore_errors=True)
+        #Clean up original upload dir
+        with _sessions_lock:
+            upload_tmpdir = _sessions[token].get(token, {}).get("_upload_tmpdir")
+        if upload_tmpdir:
+            shutil.rmtree(upload_tmpdir, ignore_errors=True)
 
 
 @app.route("/upload_status/<token>")
@@ -853,7 +920,13 @@ def upload_status(token):
 
     s = session["status"]
     if s == "processing":
-        return jsonify({"status": "processing"})
+        return jsonify({
+            "status": "processing",
+            "stage": session.get("stage", "scanning"),
+            "progress": session.get("progress", 0),
+            "file_index": session.get("file_index"),
+            "file_count": session.get("file_count"),
+        })
     if s == "error":
         return jsonify({"status": "error", "error": session.get("error", "Unknown error")}), 500
 
