@@ -455,7 +455,8 @@ def upload():
             }
 
         # Check if this JSON was exported from the app (has _physics_solved flag).
-        # Only skip physics for explicitly-marked exports
+        # Only skip physics for explicitly-marked exports; everything else
+        # gets physics solving.
         is_export = bool(graph_data.get('_physics_solved'))
         with _sessions_lock:
             _sessions[token]['uploaded_json_is_export'] = is_export
@@ -619,7 +620,15 @@ def select_chromosomes():
             for n in graph_data["nodes"]
             ),
             "is_physics_solved_export": session.get('uploaded_json_is_export', False),
-        }
+            "warn_3d_performance": (any(
+                    ((n.get("x") is not None and n.get("y") is not None)
+                    or
+                    ((n.get("data") or {}).get("x") is not None and (n.get("data") or {}).get("y") is not None))
+                    for n in graph_data.get("nodes", [])
+                )
+                and len(graph_data.get("nodes", [])) >= 2000
+            ),
+                    }
         return jsonify(response)
     
     # Handle TSV+BED uploads: kick off background processing
@@ -791,6 +800,8 @@ def _build_upload_response(token, graph_data, plots, annotation_stats,
         )
         for n in graph_data["nodes"]
     )
+    
+    warn_3d_performance = can_render_3d and total_nodes >= 2000
 
     response = {
         "token": token,
@@ -803,6 +814,7 @@ def _build_upload_response(token, graph_data, plots, annotation_stats,
         "column_transformations": column_transformations,
         "can_render_3d": can_render_3d,
         "is_physics_solved_export": is_export,
+        "warn_3d_performance": warn_3d_performance,
     }
     if available_chromosomes and len(available_chromosomes) > 1:
         response["available_chromosomes"] = available_chromosomes
@@ -987,12 +999,17 @@ def export_json(token: str):
     
     # Only mark as physics-solved if we actually have solved positions
     # (i.e., user ran physics on the frontend and posted positions back)
-    if session.get("solved_positions"):
-        export_data = dict(export_data)  # Copy to avoid mutating session data
-        export_data["_physics_solved"] = True
-    
-    buf = io.BytesIO(json.dumps(export_data, indent=2, ensure_ascii=False).encode("utf-8"))
-    buf.seek(0)
+    if session.get('solved_positions'):
+        export_data = dict(export_data)
+        export_data['physics_solved'] = True
+
+    # Inject meta block so the frontend can read node/edge count cheaply
+    export_data['meta'] = {
+        'node_count': len(export_data.get('nodes', [])),
+        'edge_count': len(export_data.get('edges', [])),
+        **{k: v for k, v in export_data.items() if k != 'meta'},
+    }
+    buf = io.BytesIO(json.dumps(export_data, indent=2, ensure_ascii=False).encode('utf-8'))
     return send_file(buf, mimetype="application/json", as_attachment=True, download_name="network_export.json")
 
 
@@ -1025,9 +1042,14 @@ def download_graph_json(token: str):
     if graph_data is None:
         return "No graph data available.", 404
 
-    buf = io.BytesIO(json.dumps(graph_data, indent=2, ensure_ascii=False).encode("utf-8"))
+    graph_data = dict(graph_data)  # shallow copy — don't mutate session data
+    graph_data['meta'] = {
+        'node_count': len(graph_data.get('nodes', [])),
+        'edge_count': len(graph_data.get('edges', [])),
+    }
+    buf = io.BytesIO(json.dumps(graph_data, indent=2, ensure_ascii=False).encode('utf-8'))
     buf.seek(0)
-    return send_file(buf, mimetype="application/json", as_attachment=True, download_name="network_data.json")
+    return send_file(buf, mimetype='application/json', as_attachment=True, download_name='network_data.json')
 
 
 @app.route("/graph3d/<token>")

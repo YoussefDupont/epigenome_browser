@@ -30,6 +30,28 @@
     .stage-pill.done    { background: #d1e7dd; color: #146c43; border-color: #a3cfbb; }
     #progress-elapsed   { font-size: 0.8em; color: #6c757d; margin-bottom: 0.4rem; min-height: 1.2em; }
     #progress-file-label { font-size: 0.8em; color: #6c757d; min-height: 1.2em; margin-top: 0.25rem; }
+    #warn-3d-banner {
+    display: none;
+    background: #fff3cd;
+    border: 1px solid #ffc107;
+    border-radius: 6px;
+    padding: 0.6rem 1rem;
+    font-size: 0.88em;
+    color: #664d03;
+    align-items: center;
+    gap: 0.6rem;
+    margin-top: 0.5rem;
+    }
+    #warn-3d-banner .warn-dismiss {
+      margin-left: auto;
+      cursor: pointer;
+      background: none;
+      border: none;
+      font-size: 1rem;
+      color: #664d03;
+      padding: 0;
+      line-height: 1;
+    }
   </style>
 </head>
 <body>
@@ -79,14 +101,16 @@
               Requires solved node positions in the uploaded JSON file.
             </div>
           </div>
+          <div id="warn-3d-banner">
+            <span>Warning!</span>
+            <span id="warn-3d-text"></span>
+            <button type="button" class="warn-dismiss" onclick="document.getElementById('warn-3d-banner').style.display='none';" aria-label="Dismiss">✕</button>
+          </div>
         </div>
         <div class="mt-3 d-flex align-items-center gap-3">
           <button type="submit" class="btn btn-primary px-4" id="upload-btn">
             <span id="upload-spinner" class="spinner-border me-1 d-none" role="status"></span>
             Load &amp; Analyze
-          </button>
-          <button type="button" class="btn btn-outline-danger px-4" id="clear-upload-btn">
-            Clear Uploads
           </button>
           <span id="status-bar" class="text-muted"></span>
           <span id="step1-elapsed-label" class="text-muted" style="font-size:0.88em;"></span>
@@ -420,14 +444,20 @@
   async function inspectJsonFor3D(file) {
     if (!file) { showJson3dOption(false); return; }
     try {
-        // Only read the first 32KB — enough to find node x/y without parsing the whole file
-        const slice = file.slice(0, 32768);
-        const text = await slice.text();
-        // Look for "x": or "y": near a node — cheap heuristic
-        if (/"x"\s*:/.test(text) && /"y"\s*:/.test(text)) {
-            showJson3dOption(true);
-            return;
+      const slice = file.slice(0, 32768);
+      const text = await slice.text();
+      if (/"x"\s*:/.test(text) && /"y"\s*:/.test(text)) {
+        showJson3dOption(true);
+        const metaMatch = text.match(/"node_count"\s*:\s*(\d+)/);
+        if (metaMatch) {
+          file._node_count = parseInt(metaMatch[1], 10);
+          file._has_meta = true;
+        } else {
+          file._node_count = 0;
+          file._has_meta = false;
         }
+        return;
+      }
     } catch (err) { /* ignore */ }
     showJson3dOption(false);
   }
@@ -435,9 +465,40 @@
   // Hide solver UI when a JSON is uploaded (physics is disabled for pre-solved layouts)
   document.getElementById('json-input').addEventListener('change', function() {
     inspectJsonFor3D(this.files[0]);
+    document.getElementById('warn-3d-banner').style.display = 'none';
     const solverSection = document.getElementById('solver-section');
     if (solverSection) {
       solverSection.style.display = this.files.length > 0 ? 'none' : 'block';
+    }
+  });
+
+  document.getElementById('json-3d-checkbox').addEventListener('change', function () {
+    const warn3dBanner = document.getElementById('warn-3d-banner');
+    if (!this.checked) {
+      warn3dBanner.style.display = 'none';
+      return;
+    }
+    const file = document.getElementById('json-input').files[0];
+    if (!file) return;
+
+    if (!file._has_meta) {
+      document.getElementById('warn-3d-text').textContent =
+        'This file was exported without performance metadata. '
+        + 'Node count cannot be estimated — 3D rendering may be slow or crash on large datasets. '
+        + 'Re-export from the current version to enable size checking. Or confirm that the file is pre-solved and contains node positions.';
+      warn3dBanner.style.display = 'flex';
+      return;
+    }
+
+    // Existing node count warning
+    if (file._node_count >= 2000) {
+      document.getElementById('warn-3d-text').textContent =
+        `This file contains ${file._node_count.toLocaleString()} nodes. `
+        + '3D rendering may be slow or unstable. '
+        + 'Use the chromosome selector inside the 3D view to focus on one chromosome at a time.';
+      warn3dBanner.style.display = 'flex';
+    } else {
+      warn3dBanner.style.display = 'none';
     }
   });
 
@@ -461,31 +522,6 @@
       display.textContent = '';
     }
   });
-
-  document.getElementById('clear-upload-btn').addEventListener('click', function() {
-    document.getElementById('tsv-input').value = '';
-    document.getElementById('bed-input').value = '';
-    document.getElementById('json-input').value = '';
-    document.getElementById('tsv-file-count').textContent = '';
-    document.getElementById('bed-file-count').textContent = '';
-    document.getElementById('status-bar').textContent = 'Upload fields cleared.';
-    document.getElementById('status-bar').className = 'text-muted';
-    document.getElementById('json-3d-checkbox').checked = false;
-    showJson3dOption(false);
-    uploadWasTsvBed = false;
-    uploadWasJson = false;
-    uploadWasPrecomputedJson = false;
-    document.getElementById('download-json-btn').style.display = 'none';
-    document.getElementById('column-review-section').style.display = 'none';
-    document.getElementById('chromosome-selection-section').style.display = 'none';
-    document.getElementById('plots-section').style.display = 'none';
-    sessionStorage.removeItem('pyvis_token');
-    sessionStorage.removeItem('pyvis_status');
-    networkTab = null;
-    const step1Label = document.getElementById('step1-elapsed-label');
-    if (step1Label) step1Label.textContent = '';
-  });
-
 
   const STAGE_ORDER = ['upload', 'parse', 'tad', 'layout', 'annot'];
   
@@ -700,6 +736,7 @@
       }
 
       showJson3dOption(!!result.can_render_3d && !!jsonFile);
+
       if (result.can_render_3d && document.getElementById('json-3d-checkbox').checked) {
         window.location.href = `/graph3d/${sessionToken}`;
         return;
@@ -740,8 +777,6 @@
           showDataAndNextSteps(result);
         }
       }
-
-      document.getElementById('download-json-btn').style.display = uploadWasTsvBed ? 'inline-flex' : 'none';
       updatePctInfo(100);
 
     } catch (err) {
@@ -1057,6 +1092,7 @@
     document.getElementById('column-review-section').style.display = 'none';
     
     setStatus('Column names confirmed. Configure annotations and select genome.', false);
+    document.getElementById('download-json-btn').style.display = uploadWasTsvBed ? 'inline-flex' : 'none';
   }
 
   function renderAnnotationConfigWithCleanedNames(cleanedAnnotations, originalAnnotations, defaults, cleanedNameMap) {
@@ -1552,7 +1588,6 @@
 
   function toggleUploadBtn(disabled) {
     document.getElementById('upload-btn').disabled = disabled;
-    document.getElementById('clear-upload-btn').disabled = disabled;
     document.getElementById('upload-spinner').classList.toggle('d-none', !disabled);
   }
 
@@ -1561,14 +1596,12 @@
     const applyBtn = document.getElementById('apply-chromosomes-btn');
     const skipBtn = document.getElementById('skip-chromosomes-btn');
     const loadBtn = document.getElementById('upload-btn');
-    const clrBtn = document.getElementById('clear-upload-btn');
     if (applyBtn) {applyBtn.disabled = disabled;
       loadBtn.disabled = disabled;
-     clrBtn.disabled = disabled;}
+      skipBtn.disabled = disabled;}
     if (skipBtn) {skipBtn.disabled = disabled;
       loadBtn.disabled = disabled;
-      clrBtn.disabled = disabled;}
-
+      skipBtn.disabled = disabled;}
   }
 
   function showDataAndNextSteps(result) {
@@ -1579,6 +1612,7 @@
       document.getElementById('annotation-config-section').style.display = 'block';
     }
     document.getElementById('plots-section').style.display = 'block';
+    document.getElementById('download-json-btn').style.display = uploadWasTsvBed ? 'inline-flex' : 'none';
     // Show genome selector if we're past annotation config
     if (document.getElementById('annotation-config-section').style.display === 'none') {
       renderGenomeSelector();

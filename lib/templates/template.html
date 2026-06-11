@@ -2668,7 +2668,7 @@
                       genes.forEach(function(g) {
                         html += '<div class="gene-row">'
                               + '<div><a href="#" class="gene-link" onclick="openGeneReport(\'' + g.queryValue + '\');return false;">' + g.symbol + '</a></div>'
-                              + '<div class="gene-meta">' + formatMb(g.start) + ' – ' + formatMb(g.end) + '</div>'
+                              + '<div class="gene-meta">' + formatMb(g.start/1e6) + ' – ' + formatMb(g.end/1e6) + '</div>'
                               + '</div>';
                       });
                     } else {
@@ -2896,7 +2896,15 @@
                       exportEdges.push({ data: Object.assign({}, allEdgesSnap[eid]) });
                     }
 
-                    var payload = JSON.stringify({ nodes: exportNodes, edges: exportEdges, _physics_solved: true }, null, 2);
+                    var payload = JSON.stringify({
+                        meta: {
+                            node_count: exportNodes.length,
+                            edge_count: exportEdges.length
+                        },
+                        nodes: exportNodes,
+                        edges: exportEdges,
+                        physics_solved: true
+                    }, null, 2);
                     var blob = new Blob([payload], { type: 'application/json' });
                     var url = URL.createObjectURL(blob);
                     var a = document.createElement('a');
