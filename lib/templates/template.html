@@ -315,6 +315,7 @@
                  border-radius:72px;
                  box-shadow: 0px 0px 10px rgba(0,0,0,0.2);
              }
+                                        
              {% endif %}
 
              {% if conf %}
@@ -2304,11 +2305,16 @@
 
                   {% if filter_menu %}
                   // Populate property dropdown with allowed properties (annotation columns + base filters)
+                    var PROP_BLOCKLIST = new Set(['comp1', 'comp2']);  
                     var _allowedProps = ['id', 'compartment', 'weight', 'genomic_dist_mb'].concat(annotationColumns);
-                    _allowedProps = Array.from(new Set(_allowedProps));  // Remove duplicates
-                  _allowedProps.forEach(function(p) {
-                      propControl.addOption({id: p, title: p});
-                  });
+                    _allowedProps = Array.from(new Set(_allowedProps));
+                    _allowedProps.forEach(function(p) {
+                        var displayLabel = p === 'id' ? 'genomic_bin_interval' : p;
+                        if (annotationConfig && annotationConfig.annotations && annotationConfig.annotations[p] && annotationConfig.annotations[p].display_name) {
+                            displayLabel = annotationConfig.annotations[p].display_name;
+                        }
+                        propControl.addOption({id: p, title: displayLabel});
+                    });
                   {% endif %}
 
                   {% if neighborhood_highlight %}
@@ -2914,6 +2920,19 @@
                     a.click();
                     setTimeout(function() { URL.revokeObjectURL(url); a.remove(); }, 1000);
                   };
+                  // Make the Bootstrap arrow zone on ALL ts-wrappers open the dropdown
+                  (function patchTomSelectArrows() {
+                      document.querySelectorAll('.ts-wrapper').forEach(function(wrapper) {
+                          wrapper.addEventListener('click', function(e) {
+                              var control = wrapper.querySelector('.ts-control');
+                              if (!control) return;
+                              var rect = control.getBoundingClientRect();
+                              if (e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) {
+                                  control.click();
+                              }
+                          });
+                      });
+                  })();
                 return network;
             }
           drawGraph();

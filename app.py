@@ -386,6 +386,50 @@ def _kick_off_tsv_build(token, chromosomes=None):
     )
     t.start()
 
+def _process_json_upload(token):
+    # Background worker: compute plots/stats for a JSON upload
+    try:
+        with _sessions_lock:
+            s = _sessions[token]
+            gd = s['graph_data']
+            da = s['detected_annotations']
+
+        available_chromosomes = sorted({
+            (n.get('data') or n).get('chrom')
+            for n in gd.get('nodes', [])
+            if (n.get('data') or n).get('chrom') is not None
+        })
+
+        with _sessions_lock:
+            if len(available_chromosomes) > 1:
+                _sessions[token].update(
+                    status='awaiting_chromosomes', stage='upload', progress=10,
+                    available_chromosomes=available_chromosomes
+                )
+                return
+
+        _set_progress(token, 'annot', 50)
+        plots  = _make_distribution_plots(gd, annotation_columns=da)
+        stats  = _compute_annotation_stats(gd, da or [])
+        pct    = _weight_percentile_table(gd)
+        col_transforms = [
+            {'original': c, 'cleaned': clean_annotation_name(c)}
+            for c in (da or [])
+        ]
+        _set_progress(token, 'annot', 90)
+        with _sessions_lock:
+            _sessions[token].update(
+                status='ready', stage='done', progress=100,
+                plots=plots, annotation_stats=stats,
+                pct_table=pct, column_transformations=col_transforms,
+                available_chromosomes=available_chromosomes
+            )
+
+    except Exception as exc:
+        with _sessions_lock:
+            _sessions[token]['status'] = 'error'
+            _sessions[token]['error']  = str(exc)
+
 @app.route("/")
 def index():
     return render_template("app_ui.html")
@@ -433,56 +477,40 @@ def upload():
         })
 
         token = str(uuid.uuid4())
+        is_export = bool(graph_data.get('_physics_solved'))
+
         with _sessions_lock:
             _sessions[token] = {
-                "status": "ready",
-                "error": None,
-                "graph_data": graph_data,
-                "network_html": None,
-                "network_html_lock": threading.Lock(),
-                "annotation_config": annotation_config,
-                "detected_annotations": detected_annotations,
-                "column_overrides": {},
-                "available_chromosomes": available_chromosomes,
-                "plots": None,
-                "annotation_stats": None,
-                "pct_table": None,
-                "column_transformations": None,
-                "stage": "done",
-                "progress": 100,
-                "file_index": None,
-                "file_count": None,
+                'status': 'processing', 'stage': 'parse', 'progress': 10,
+                'error': None, 'graph_data': graph_data,
+                'network_html': None, 'network_html_lock': threading.Lock(),
+                'annotation_config': annotation_config,
+                'detected_annotations': detected_annotations,
+                'column_overrides': {},
+                'available_chromosomes': available_chromosomes,
+                'uploaded_json_is_export': is_export,
+                'plots': None, 'annotation_stats': None,
+                'pct_table': None, 'column_transformations': None,
+                'file_index': None, 'file_count': None, 'is_tsv': False,
             }
 
-        # Check if this JSON was exported from the app (has _physics_solved flag).
-        # Only skip physics for explicitly-marked exports; everything else
-        # gets physics solving.
-        is_export = bool(graph_data.get('_physics_solved'))
-        with _sessions_lock:
-            _sessions[token]['uploaded_json_is_export'] = is_export
-
-        plots = _make_distribution_plots(graph_data, annotation_columns=detected_annotations)
-        annotation_stats = _compute_annotation_stats(graph_data, detected_annotations or [])
-        pct_table = _weight_percentile_table(graph_data)
-
-        # Build column transformations for cleaned annotation names
-        column_transformations = []
-        if detected_annotations:
-            for col in detected_annotations:
-                cleaned = clean_annotation_name(col)
-                column_transformations.append({'original': col, 'cleaned': cleaned})
-
-        # Store in session
-        with _sessions_lock:
-            _sessions[token]['plots'] = plots
-            _sessions[token]['annotation_stats'] = annotation_stats
-            _sessions[token]['pct_table'] = pct_table
-            _sessions[token]['column_transformations'] = column_transformations
-
-        response = _build_upload_response(token, graph_data, plots, annotation_stats,
-                                          pct_table, detected_annotations, annotation_config,
-                                          available_chromosomes, is_tsv=False, is_export=is_export)
-        return jsonify(response)
+        if len(available_chromosomes) > 1:
+            can_render_3d = any(
+                ((n.get("x") is not None and n.get("y") is not None)
+                or
+                ((n.get("data") or {}).get("x") is not None and (n.get("data") or {}).get("y") is not None))
+                for n in graph_data["nodes"]
+            )
+            return jsonify({
+                'token': token,
+                'status': 'awaiting_chromosomes',
+                'available_chromosomes': available_chromosomes,
+                'can_render_3d': can_render_3d,
+            }), 200
+        else:
+            t = threading.Thread(target=_process_json_upload, args=(token,), daemon=True)
+            t.start()
+            return jsonify({'token': token, 'status': 'processing'}), 202
 
     # # TSV + BED upload path (async) and stream files to disk immediately so they are never held as byte buffers in memory
     tsv_files = [f for f in tsv_files if f and f.filename]
@@ -535,6 +563,7 @@ def upload():
             "progress": 0,
             "file_index": None,
             "file_count": len(tsv_paths),
+            '_is_tsv': True,
         }
 
     t = threading.Thread(
@@ -571,66 +600,52 @@ def select_chromosomes():
                             and (e.get("data") or e).get("target") in {n["data"]["id"] if "data" in n else n.get("id") for n in filtered_nodes}]
             graph_data = {"nodes": filtered_nodes, "edges": filtered_edges}
         
-        # Recompute plots and stats for filtered data
+    with _sessions_lock:
+        session["status"]     = "processing"
+        session["stage"]      = "parse"
+        session["progress"]   = 10
+        session["graph_data"] = graph_data
+
+        def _recompute_json_chromosomes(tok, gd, da, ac):
+            try:
+                _set_progress(tok, "annot", 50)
+                plots  = _make_distribution_plots(gd, annotation_columns=da)
+                stats  = _compute_annotation_stats(gd, da or [])
+                pct    = _weight_percentile_table(gd)
+                col_transforms = [
+                    {"original": c, "cleaned": clean_annotation_name(c)}
+                    for c in (da or [])
+                ]
+                filtered_chroms = sorted({
+                    (n.get("data") or n).get("chrom")
+                    for n in gd.get("nodes", [])
+                    if (n.get("data") or n).get("chrom") is not None
+                })
+                _set_progress(tok, "annot", 90)
+                with _sessions_lock:
+                    _sessions[tok].update(
+                        status="ready", stage="done", progress=100,
+                        plots=plots, annotation_stats=stats,
+                        pct_table=pct, column_transformations=col_transforms,
+                        available_chromosomes=filtered_chroms,
+                        annotation_config=ac,
+                    )
+            except Exception as exc:
+                with _sessions_lock:
+                    _sessions[tok]["status"] = "error"
+                    _sessions[tok]["error"]  = str(exc)
+        
         detected_annotations = session.get("detected_annotations", [])
-        plots = _make_distribution_plots(graph_data, annotation_columns=detected_annotations)
-        annotation_stats = _compute_annotation_stats(graph_data, detected_annotations or [])
-        pct_table = _weight_percentile_table(graph_data)
+        annotation_config = session.get("annotation_config")
+
+        t = threading.Thread(
+            target=_recompute_json_chromosomes,
+            args=(token, graph_data, detected_annotations, annotation_config),
+            daemon=True,
+        )
+        t.start()
+        return jsonify({"selected_chromosomes": selected, "status": "processing"})
         
-        # Build column transformations for cleaned annotation names
-        column_transformations = []
-        if detected_annotations:
-            for col in detected_annotations:
-                cleaned = clean_annotation_name(col)
-                column_transformations.append({'original': col, 'cleaned': cleaned})
-        
-        # Get available chromosomes from filtered data
-        filtered_chroms = sorted({
-            (n.get('data') or n).get('chrom')
-            for n in graph_data.get('nodes', [])
-            if ((n.get('data') or n).get('chrom') is not None)
-        })
-        
-        # Update session with filtered data and column transformations
-        with _sessions_lock:
-            session["graph_data"] = graph_data
-            session["plots"] = plots
-            session["annotation_stats"] = annotation_stats
-            session["pct_table"] = pct_table
-            session["column_transformations"] = column_transformations
-            session["available_chromosomes"] = filtered_chroms
-        
-        response = {
-            "token": token,
-            "status": "ready",
-            "total_nodes": len(graph_data["nodes"]),
-            "total_edges": len(graph_data["edges"]),
-            "plots": plots,
-            "annotation_stats": annotation_stats,
-            "percentile_table": pct_table,
-            "column_transformations": column_transformations,
-            "detected_annotations": list(detected_annotations) if detected_annotations else [],
-            "annotation_defaults": session.get("annotation_config"),
-            "available_chromosomes": filtered_chroms,
-            "can_render_3d": any(
-                ((n.get("x") is not None and n.get("y") is not None)
-                or
-                ((n.get("data") or {}).get("x") is not None and (n.get("data") or {}).get("y") is not None)
-            )
-            for n in graph_data["nodes"]
-            ),
-            "is_physics_solved_export": session.get('uploaded_json_is_export', False),
-            "warn_3d_performance": (any(
-                    ((n.get("x") is not None and n.get("y") is not None)
-                    or
-                    ((n.get("data") or {}).get("x") is not None and (n.get("data") or {}).get("y") is not None))
-                    for n in graph_data.get("nodes", [])
-                )
-                and len(graph_data.get("nodes", [])) >= 2000
-            ),
-                    }
-        return jsonify(response)
-    
     # Handle TSV+BED uploads: kick off background processing
     if "_tsv_paths" not in session:
         return jsonify({
@@ -869,6 +884,8 @@ def _process_tsv_upload(token, tsv_paths, bed_paths, max_degree, chromosomes=Non
         )
         graph_data = _normalize_graph_data(graph_data)
 
+        _set_progress(token, 'layout', 60, file_index=None, file_count=file_count)
+
         if not graph_data["nodes"] or not graph_data["edges"]:
             raise ValueError("No valid nodes/edges found after parsing input.")
 
@@ -883,6 +900,8 @@ def _process_tsv_upload(token, tsv_paths, bed_paths, max_degree, chromosomes=Non
         plots = _make_distribution_plots(graph_data, annotation_columns=detected_annotations)
         annotation_stats = _compute_annotation_stats(graph_data, detected_annotations)
         pct_table = _weight_percentile_table(graph_data)
+
+        _set_progress(token, 'annot', 90, file_index=None, file_count=file_count) 
 
         column_transformations = [
             {'original': col, 'cleaned': clean_annotation_name(col)}
@@ -917,7 +936,7 @@ def _process_tsv_upload(token, tsv_paths, bed_paths, max_degree, chromosomes=Non
         shutil.rmtree(tmpdir, ignore_errors=True)
         #Clean up original upload dir
         with _sessions_lock:
-            upload_tmpdir = _sessions[token].get(token, {}).get("_upload_tmpdir")
+            upload_tmpdir = _sessions[token].get("_upload_tmpdir")
         if upload_tmpdir:
             shutil.rmtree(upload_tmpdir, ignore_errors=True)
 
@@ -958,7 +977,7 @@ def upload_status(token):
         session["detected_annotations"],
         session["annotation_config"],
         session["available_chromosomes"],
-        is_tsv=True,
+        is_tsv=session.get('_is_tsv', True),
     )
     response["column_transformations"] = session.get("column_transformations") or []
     return jsonify(response)

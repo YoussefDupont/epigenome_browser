@@ -404,6 +404,7 @@
   let currentAnnotationDefaults = {};
   let currentPlots = {};
   let currentAnnotationStats = {};
+  let availableChromosomes = [];
 
   let networkTab = null;
   let _totalElapsedSec = 0;
@@ -586,22 +587,28 @@
     }
   }
 
-  async function pollUntilReady(token, startStage) {
-    const effectiveStart = startStage || 'upload';
-    showProgressCard(effectiveStart);
-    updateProgressCard(effectiveStart, 5, null, null, 0);
-    setStatus('Processing\u2026', true);
-
-    let elapsedSec = 0;
+  async function pollUntilReady(token, startStage, autoHide = true, cardAlreadyShown = false, existingStartTime = null) {
+    if (!cardAlreadyShown) {
+        const effectiveStart = startStage || 'upload';
+        showProgressCard(effectiveStart);
+        updateProgressCard(effectiveStart, 5, null, null, 0);
+    }
+    setStatus('Processing…', true);
+    const startTime = existingStartTime || Date.now();
+    const elEl = document.getElementById('progress-elapsed');
+    if (elEl) elEl.textContent = 'Elapsed: 0s';
     const elapsedTimer = setInterval(function() {
-      elapsedSec++;
-      const el = document.getElementById('progress-elapsed');
-      if (el) el.textContent = 'Elapsed: ' + elapsedSec + 's';
+        const secs = Math.floor((Date.now() - startTime) / 1000);
+        const el = document.getElementById('progress-elapsed');
+        if (el) el.textContent = `Elapsed: ${secs}s`;
     }, 1000);
-
+    let firstPoll = true;
     try {
       while (true) {
-        await new Promise(r => setTimeout(r, 1800));
+        if (!firstPoll) {
+                await new Promise(r => setTimeout(r, 400));
+            }
+        firstPoll = false;
         const pollResp = await fetch('/upload_status/' + token);
         const polled   = await pollResp.json();
 
@@ -610,10 +617,14 @@
         const currentFile = polled.current_file || null;
         const totalFiles  = polled.total_files  || null;
 
-        updateProgressCard(stage, pct, currentFile, totalFiles, elapsedSec);
+        updateProgressCard(stage, pct, currentFile, totalFiles, null);
         if (polled.detail) setStatus(polled.detail, true);
 
         if (polled.status === 'processing') continue;
+        if (polled.status === 'awaitingchromosomes') {
+        clearInterval(elapsedTimer)
+        return polled
+        }
         if (polled.status === 'error') {
           clearInterval(elapsedTimer);
           document.getElementById('progress-card').style.display = 'none';
@@ -632,8 +643,10 @@
         const bar = document.getElementById('progress-bar');
         if (bar) { bar.style.width = '100%'; bar.textContent = '100%'; bar.classList.remove('progress-bar-animated'); }
         await new Promise(r => setTimeout(r, 500));
-        document.getElementById('progress-card').style.display = 'none';
-        _totalElapsedSec += elapsedSec;
+        if (autoHide) {
+        document.getElementById('progress-card').style.display = 'none'
+        }
+        _totalElapsedSec = Math.floor((Date.now() - startTime) / 1000);
         const step1Label = document.getElementById('step1-elapsed-label');
         if (step1Label) step1Label.textContent = 'Completed in ' + _totalElapsedSec + 's';
         return polled;
@@ -703,6 +716,17 @@
       sessionToken = initial.token;
 
       let result = initial;
+      if (initial.status === 'awaiting_chromosomes') {
+          if (initial.can_render_3d && document.getElementById('json-3d-checkbox').checked) {
+              window.location.href = `/graph3d/${sessionToken}`;
+              return;
+          }
+          renderChromosomeSelection(initial.available_chromosomes);
+          document.getElementById('chromosome-selection-section').style.display = 'block';
+          setStatus('Chromosome scan complete. Please select chromosomes to include.', false);
+          toggleUploadBtn(false);
+          return;
+      }
       if (initial.status === 'processing') {
         sessionStorage.setItem('pyvis_token', sessionToken);
         sessionStorage.setItem('pyvis_status', 'processing');
@@ -723,7 +747,19 @@
         return;
       }
 
+      showJson3dOption(!!result.can_render_3d && !!jsonFile);
+      
+      const checkbox = document.getElementById('json-3d-checkbox');
+      console.log('3d checkbox element:', checkbox, 'checked:', checkbox && checkbox.checked, 'can_render_3d:', result.can_render_3d);
+      if (result.can_render_3d && checkbox && checkbox.checked) {
+        window.location.href = `/graph3d/${sessionToken}`;
+        return;
+      }
+
+      uploadWasPrecomputedJson = result.is_physics_solved_export || false;
+
       if (result.status === 'awaiting_chromosomes') {
+        updateProgressCard('upload', 10, null, null, 0)
         renderChromosomeSelection(result.available_chromosomes);
         document.getElementById('chromosome-selection-section').style.display = 'block';
         document.getElementById('column-review-section').style.display = 'none';
@@ -734,15 +770,6 @@
         toggleUploadBtn(false);
         return;
       }
-
-      showJson3dOption(!!result.can_render_3d && !!jsonFile);
-
-      if (result.can_render_3d && document.getElementById('json-3d-checkbox').checked) {
-        window.location.href = `/graph3d/${sessionToken}`;
-        return;
-      }
-
-      uploadWasPrecomputedJson = result.is_physics_solved_export || false;
 
       document.getElementById('data-summary').textContent =
         `Loaded ${result.total_nodes.toLocaleString()} nodes and ${result.total_edges.toLocaleString()} edges objects.`;
@@ -896,6 +923,7 @@
   // Chromosome selection UI
   // -------------------------------------------------------------------------
   function renderChromosomeSelection(chromosomes) {
+    availableChromosomes = chromosomes;
     const container = document.getElementById('chromosome-checkboxes');
     container.innerHTML = '';
     chromosomes.forEach(function(ch) {
@@ -929,24 +957,36 @@
       document.getElementById('chromosome-selection-status').textContent = 'Missing session token.';
       return;
     }
-    setStatus('Applying chromosome selection\u2026', true);
-    // Disable both buttons to prevent double submissions (keep card visible)
+    showProgressCard('parse');
+    updateProgressCard('parse', 10, null, null, null);
+    setStatus('Applying chromosome selection…', true);
     disableAllProcessingButtons(true);
+    
     try {
+      const startTime = Date.now();
+      document.getElementById('progress-elapsed').textContent = 'Elapsed: 0s';
+      const earlyTimer = setInterval(function() {
+          const secs = Math.floor((Date.now() - startTime) / 1000);
+          const el = document.getElementById('progress-elapsed');
+          if (el) el.textContent = 'Elapsed: ' + secs + 's';
+      }, 1000);
       const resp = await fetch('/select_chromosomes', {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({token: sessionToken, selected_chromosomes: selected})
-      });
-      const res = await resp.json();
-      if (res.error) {
-        document.getElementById('chromosome-selection-status').textContent = 'Error: ' + res.error;
-        setStatus('Error applying chromosome selection.', false, true);
-        disableAllProcessingButtons(false);
-        return;
-      }
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({token: sessionToken, selected_chromosomes: selected})
+        });
+        const res = await resp.json();
+        if (res.error) {
+            document.getElementById('chromosome-selection-section').style.display = 'block';
+            document.getElementById('progress-card').style.display = 'none';
+            setStatus('Error: ' + res.error, false, true);
+            disableAllProcessingButtons(false);
+            return;
+        }
       let result;
       try {
-        result = await pollUntilReady(sessionToken, 'parse');
+        clearInterval(earlyTimer);
+        result = await pollUntilReady(sessionToken, 'parse', true, true, startTime);
       } catch (err) {
         setStatus('Error: ' + err.message, false, true);
         disableAllProcessingButtons(false);
@@ -963,7 +1003,9 @@
       document.getElementById('data-summary').textContent =
         `Loaded ${(result.total_nodes||0).toLocaleString()} nodes and ${(result.total_edges||0).toLocaleString()} edges objects.`;
 
-      if (currentColumnTransformations.length > 0) {
+        collapseChromosomeCardToSummary(selected, result.total_nodes, result.total_edges);
+      
+        if (currentColumnTransformations.length > 0) {
         renderColumnTransformations(currentColumnTransformations);
         document.getElementById('column-review-section').style.display = 'block';
         document.getElementById('plots-section').style.display = 'none';
@@ -982,23 +1024,36 @@
 
   document.getElementById('skip-chromosomes-btn').addEventListener('click', async function() {
     if (!sessionToken) return;
-    setStatus('Processing all chromosomes…', true);
-    // Disable both buttons to prevent double submissions (keep card visible)
+    showProgressCard('parse');
+    updateProgressCard('parse', 10, null, null, null);
+    setStatus('Applying chromosome selection…', true);
     disableAllProcessingButtons(true);
+
     try {
+      const startTime = Date.now();
+      document.getElementById('progress-elapsed').textContent = 'Elapsed: 0s';
+      const earlyTimer = setInterval(function() {
+          const secs = Math.floor((Date.now() - startTime) / 1000);
+          const el = document.getElementById('progress-elapsed');
+          if (el) el.textContent = 'Elapsed: ' + secs + 's';
+      }, 1000);
       const resp = await fetch('/select_chromosomes', {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({token: sessionToken, selected_chromosomes: []})
-      });
-      const res = await resp.json();
-      if (res.error) {
-        setStatus('Error: ' + res.error, false, true);
-        disableAllProcessingButtons(false);
-        return;
-      }
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({token: sessionToken, selected_chromosomes: selected})
+        });
+        const res = await resp.json();
+        if (res.error) {
+            document.getElementById('chromosome-selection-section').style.display = 'block';
+            document.getElementById('progress-card').style.display = 'none';
+            setStatus('Error: ' + res.error, false, true);
+            disableAllProcessingButtons(false);
+            return;
+        }
       let result;
       try {
-        result = await pollUntilReady(sessionToken, 'parse');
+        clearInterval(earlyTimer);
+        result = await pollUntilReady(sessionToken, 'parse', true, true, startTime);
       } catch (err) {
         setStatus('Error: ' + err.message, false, true);
         disableAllProcessingButtons(false);
@@ -1015,6 +1070,8 @@
       document.getElementById('data-summary').textContent =
         `Loaded ${(result.total_nodes||0).toLocaleString()} nodes and ${(result.total_edges||0).toLocaleString()} edges objects.`;
 
+      collapseChromosomeCardToSummary(selected, result.total_nodes, result.total_edges);
+
       if (currentColumnTransformations.length > 0) {
         renderColumnTransformations(currentColumnTransformations);
         document.getElementById('column-review-section').style.display = 'block';
@@ -1030,6 +1087,54 @@
       disableAllProcessingButtons(false);
     }
   });
+
+  function collapseChromosomeCardToSummary(selectedChroms, nodeCount, edgeCount) {
+    const body = document.querySelector('#chromosome-selection-section .card-body');
+    const pills = selectedChroms.map(c =>
+        `<span class="badge bg-light text-dark border me-1">${c}</span>`
+    ).join('');
+    body.innerHTML = `
+        <h5 class="card-title mb-2">2a. Chromosomes Loaded</h5>
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <div>
+                <span class="fw-semibold me-2">Selected:</span>${pills}
+                <span class="text-muted ms-3" style="font-size:0.88em">
+                    ${nodeCount.toLocaleString()} nodes · ${edgeCount.toLocaleString()} edges
+                </span>
+            </div>
+            <button class="btn btn-sm btn-outline-secondary" id="reselect-chromosomes-btn">
+                Change selection
+            </button>
+        </div>`;
+
+    document.getElementById('reselect-chromosomes-btn').addEventListener('click', function () {
+        // Restore the full interactive card
+        const section = document.getElementById('chromosome-selection-section');
+        section.querySelector('.card-body').innerHTML = `
+            <h5 class="card-title mb-3">2a. Select Chromosomes</h5>
+            <p class="text-muted small mb-3">Multiple chromosomes detected in your upload.
+            Choose which chromosomes to include in the network — rows are kept only if both
+            incident chromosomes are selected.</p>
+            <div id="chromosome-checkboxes" style="display:flex;flex-wrap:wrap;gap:0.5rem"></div>
+            <div style="margin-top:0.75rem;display:flex;gap:0.5rem">
+                <button class="btn btn-primary px-4" id="apply-chromosomes-btn">Apply Chromosome Selection</button>
+                <button class="btn btn-outline-secondary px-4" id="skip-chromosomes-btn">Skip (use all)</button>
+            </div>
+            <div style="margin-top:0.6rem;font-size:0.9rem;color:#374151" id="chromosome-selection-status"></div>`;
+
+        renderChromosomeSelection(availableChromosomes);
+
+        // Hide downstream results since selection is changing
+        document.getElementById('progress-card').style.display = 'none';
+        document.getElementById('column-review-section').style.display = 'none';
+        document.getElementById('plots-section').style.display = 'none';
+        document.getElementById('annotation-config-section').style.display = 'none';
+        document.getElementById('genome-selection-section').style.display = 'none';
+        document.getElementById('percentile-section').style.display = 'none';
+        document.getElementById('download-json-btn').style.display = 'none';
+        setStatus('', false);
+    });
+}
 
   function escapeHtml(text) {
     const map = {

@@ -72,7 +72,7 @@ def _build(data: dict, output_html: str, annotation_config=None, all_genes=None,
         for col in node_data_columns:
             node_kwargs[col] = d.get(col)
 
-        node_kwargs["group"] = d.get("parent") or "Unassigned"
+        node_kwargs["group"] = d.get("group") or d.get("parent") or "Unassigned"
         net.add_node(node_id, **node_kwargs)
 
     def _edge_weight(d):

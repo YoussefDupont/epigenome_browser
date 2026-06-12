@@ -331,4 +331,9 @@
   width: 1px !important;
   white-space: nowrap !important; }
 
+.ts-wrapper.single .ts-control {
+  padding-right: 2.25rem;
+  width: 100%;
+}
+
 /*# sourceMappingURL=tom-select.css.map */

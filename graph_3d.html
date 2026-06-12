@@ -247,7 +247,15 @@
             currentConvexHull = hull;
           }
         });
+        
+      Graph.d3Force('link').distance(link => link.linkDistance ?? 100);
+      Graph.d3Force('link').strength(link => link.linkStrength ?? 0.1);
 
+      // Click on empty space deselects the TAD highlight
+      Graph.onBackgroundClick(() => {
+        if (highlightedTADNodes.length > 0) clearTADHighlight();
+      });
+      
       let rawGraphNodes = [];
       // rawGraphLinks stores plain {source: string, target: string} objects.
       // It is NEVER passed directly to Graph.graphData() — we always pass a
@@ -431,6 +439,28 @@
         Graph.graphData({ nodes: graphNodes, links: graphLinks });
       }
 
+      function clearTADHighlight() {
+        // Restore original colours
+        highlightedTADNodes.forEach(nodeId => {
+          const node = graphNodes.find(n => n.id === nodeId);
+          if (node) node.color = nodeOriginalColors[nodeId] || '#8aa1b0';
+        });
+        highlightedTADNodes = [];
+        highlightedTADNodeIds = new Set();
+        nodeOriginalColors = {};
+
+        // Remove convex hull
+        if (currentConvexHull) {
+          Graph.scene().remove(currentConvexHull);
+          currentConvexHull = null;
+        }
+        highlightedNode = null;
+
+        // Refresh link opacities and node objects
+        Graph.refresh();
+        Graph.graphData({ nodes: graphNodes, links: graphLinks });
+      }
+
       function setCurrentTAD(index, animate = true) {
         if (!allTADs.length) return;
         currentTADIndex = Math.max(0, Math.min(index, allTADs.length - 1));
@@ -466,6 +496,7 @@
 
       function setChromosomeFilter(chrom) {
         selectedChromosome = chrom || 'all';
+        clearTADHighlight();
         const subset = getGraphSubset(selectedChromosome);
         graphNodes = subset.nodes;
         graphLinks = subset.links;
@@ -620,21 +651,32 @@
                 x: resolvedX,
                 y: resolvedY,
                 z: resolvedZ,
-                // Pin nodes to their solved x/y so 3d-force-graph does not
-                // re-run physics and collapse the layout. z is left free so
-                // the simulation can spread nodes into the third dimension.
-                fx: resolvedX,
-                fy: resolvedY,
                 color: details.baseColour || details.color || '#8aa1b0',
                 chrom: details.chrom || details.chr || details.chromosome || '',
               };
             }).filter(node => node.id);
 
-            const links = (data.edges || []).map(raw => ({
-              source: String(raw.source ?? raw.data?.source ?? raw.data?.from ?? raw.from ?? ''),
-              target: String(raw.target ?? raw.data?.target ?? raw.data?.to ?? raw.to ?? ''),
-            })).filter(link => link.source && link.target);
+            const rawWeights = (data.edges || []).map(raw => {
+              const d = raw.data || raw;
+              return parseFloat(d.weight ?? d.value ?? 1) || 1;
+            });
+            const wMax = Math.max(...rawWeights, 1);
+            const wMin = Math.min(...rawWeights.filter(w => w > 0), 1e-9);
+            const logRange = Math.log1p(wMax) - Math.log1p(wMin) || 1;
 
+            const links = (data.edges || []).map((raw, i) => {
+              const d = raw.data || raw;
+              const w = rawWeights[i];
+              const normLog = (Math.log1p(w) - Math.log1p(wMin)) / logRange; // 0→1, higher=stronger
+              return {
+                source: String(raw.source ?? d.source ?? d.from ?? raw.from ?? ''),
+                target: String(raw.target ?? d.target ?? d.to ?? raw.to ?? ''),
+                // Stronger interaction → shorter spring, stiffer pull
+                linkDistance: 20 + (1 - normLog) * 230,     // range [20, 250]
+                linkStrength: 0.05 + normLog * 0.45,        // range ~[0.05, 0.5]
+              };
+            }).filter(link => link.source && link.target);
+            
             rawGraphNodes = nodes;
             rawGraphLinks = links;  // plain string-ID objects; never mutated
             rawChromosomes = Array.isArray(data.chromosomes) ? data.chromosomes.map(String).filter(Boolean) : [];
