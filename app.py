@@ -586,25 +586,31 @@ def select_chromosomes():
         session = _sessions.get(token)
     if session is None:
         return jsonify({"error": "Unknown session token"}), 404
-    
-    # Handle JSON uploads: filter graph_data by selected chromosomes
-    if "graph_data" in session and "_tsv_paths" not in session:
+
+    # JSON upload path
+    if "graph_data" in session and session.get("graph_data") is not None and "_tsv_paths" not in session:
         graph_data = session["graph_data"]
-        
-        # If chromosomes selected, filter nodes and edges
+
         if selected:
-            filtered_nodes = [n for n in graph_data["nodes"] 
-                            if (n.get("data") or n).get("chrom") in selected]
+            filtered_nodes = [n for n in graph_data["nodes"]
+                              if (n.get("data") or n).get("chrom") in selected]
+            node_ids = {
+                n["data"]["id"] if "data" in n else n.get("id")
+                for n in filtered_nodes
+            }
             filtered_edges = [e for e in graph_data["edges"]
-                            if (e.get("data") or e).get("source") in {n["data"]["id"] if "data" in n else n.get("id") for n in filtered_nodes}
-                            and (e.get("data") or e).get("target") in {n["data"]["id"] if "data" in n else n.get("id") for n in filtered_nodes}]
+                              if (e.get("data") or e).get("source") in node_ids
+                              and (e.get("data") or e).get("target") in node_ids]
             graph_data = {"nodes": filtered_nodes, "edges": filtered_edges}
-        
-    with _sessions_lock:
-        session["status"]     = "processing"
-        session["stage"]      = "parse"
-        session["progress"]   = 10
-        session["graph_data"] = graph_data
+
+        detected_annotations = session.get("detected_annotations", [])
+        annotation_config = session.get("annotation_config")
+
+        with _sessions_lock:
+            session["status"]     = "processing"
+            session["stage"]      = "parse"
+            session["progress"]   = 10
+            session["graph_data"] = graph_data
 
         def _recompute_json_chromosomes(tok, gd, da, ac):
             try:
@@ -634,9 +640,6 @@ def select_chromosomes():
                 with _sessions_lock:
                     _sessions[tok]["status"] = "error"
                     _sessions[tok]["error"]  = str(exc)
-        
-        detected_annotations = session.get("detected_annotations", [])
-        annotation_config = session.get("annotation_config")
 
         t = threading.Thread(
             target=_recompute_json_chromosomes,
@@ -645,12 +648,12 @@ def select_chromosomes():
         )
         t.start()
         return jsonify({"selected_chromosomes": selected, "status": "processing"})
-        
-    # Handle TSV+BED uploads: kick off background processing
+
+    # TSV+BED path
     if "_tsv_paths" not in session:
         return jsonify({
             "error": "Session is missing uploaded file data. Please re-upload your files."
-            }), 400
+        }), 400
 
     chroms_to_use = selected if selected else None
     _kick_off_tsv_build(token, chromosomes=chroms_to_use)
