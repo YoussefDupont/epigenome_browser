@@ -469,6 +469,7 @@ def upload():
             detected_annotations = list(annotation_config.get("annotations", {}).keys())
         else:
             annotation_config = get_annotation_config_defaults(detected_annotations) if detected_annotations else None
+            annotation_truncated = annotation_config.pop('truncated', False) if annotation_config else False
 
         available_chromosomes = sorted({
             (n.get('data') or n).get('chrom')
@@ -492,6 +493,7 @@ def upload():
                 'plots': None, 'annotation_stats': None,
                 'pct_table': None, 'column_transformations': None,
                 'file_index': None, 'file_count': None, 'is_tsv': False,
+                'annotation_truncated': annotation_truncated,
             }
 
         if len(available_chromosomes) > 1:
@@ -766,6 +768,11 @@ def configure_annotations():
         return jsonify({"error": "Unknown session token"}), 404
     
     selected_columns = body.get("selected_columns", [])
+    if len(selected_columns) > 7:
+        return jsonify({
+            "error": f"You selected {len(selected_columns)} annotations. Please select at most 7."
+        }), 400
+    
     annotations_config = body.get("annotations", {})
     node_sizing_column = body.get("node_sizing_column")
     
@@ -800,7 +807,8 @@ def configure_annotations():
 
 def _build_upload_response(token, graph_data, plots, annotation_stats,
                             pct_table, detected_annotations, annotation_config,
-                            available_chromosomes, is_tsv, is_export=False):
+                            available_chromosomes, is_tsv, is_export=False,
+                            annotation_truncated=False):
     """Assemble the JSON payload returned to the browser after a successful upload."""
     total_nodes = len(graph_data["nodes"])
     total_edges = len(graph_data["edges"])
@@ -833,6 +841,7 @@ def _build_upload_response(token, graph_data, plots, annotation_stats,
         "can_render_3d": can_render_3d,
         "is_physics_solved_export": is_export,
         "warn_3d_performance": warn_3d_performance,
+        "annotation_truncated": annotation_truncated,
     }
     if available_chromosomes and len(available_chromosomes) > 1:
         response["available_chromosomes"] = available_chromosomes
@@ -874,6 +883,7 @@ def _process_tsv_upload(token, tsv_paths, bed_paths, max_degree, chromosomes=Non
             detected_annotations = detect_annotation_columns(tsv_path)
             detected_annotations = [re.sub(r'_1$', '', col) for col in detected_annotations]
             annotation_config = get_annotation_config_defaults(detected_annotations)
+            annotation_truncated = annotation_config.pop('truncated', False)
         except Exception as exc:
             print(f"Warning: Failed to detect annotations: {exc}")
             detected_annotations = []
@@ -926,6 +936,7 @@ def _process_tsv_upload(token, tsv_paths, bed_paths, max_degree, chromosomes=Non
             session["annotation_stats"] = annotation_stats
             session["pct_table"] = pct_table
             session["column_transformations"] = column_transformations
+            session["annotation_truncated"] = annotation_truncated
 
         print(f"[upload:{token[:8]}] ready — {len(graph_data['nodes'])} nodes, {len(graph_data['edges'])} edges")
 
@@ -981,7 +992,9 @@ def upload_status(token):
         session["annotation_config"],
         session["available_chromosomes"],
         is_tsv=session.get('_is_tsv', True),
+        annotation_truncated=session.get('annotation_truncated', False),
     )
+    
     response["column_transformations"] = session.get("column_transformations") or []
     return jsonify(response)
 
@@ -1064,7 +1077,7 @@ def download_graph_json(token: str):
     if graph_data is None:
         return "No graph data available.", 404
 
-    graph_data = dict(graph_data)  # shallow copy — don't mutate session data
+    graph_data = dict(graph_data)
     graph_data['meta'] = {
         'node_count': len(graph_data.get('nodes', [])),
         'edge_count': len(graph_data.get('edges', [])),

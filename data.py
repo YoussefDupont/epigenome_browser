@@ -109,8 +109,20 @@ def detect_annotation_columns(file):
 
 def get_annotation_config_defaults(detected_columns):
     """Suggest default configuration for detected annotations."""
+    MAX_ANNOT = 15
     defaults = {}
-    for col in detected_columns[:7]:
+    if len(detected_columns) >= MAX_ANNOT:
+        warnings.warn(
+            f"Annotation list truncated to {MAX_ANNOT} columns "
+            f"({len(detected_columns)} were detected). "
+            f"Only the first {MAX_ANNOT} will be available for selection.",
+            UserWarning,
+            stacklevel=2,
+        )
+    cols = detected_columns[:MAX_ANNOT]
+
+    defaults = {}
+    for col in cols:
         col_lower = col.lower()
         if 'compartment' in col_lower or 'comp' in col_lower:
             defaults[col] = {
@@ -126,14 +138,13 @@ def get_annotation_config_defaults(detected_columns):
             defaults[col] = {'color_mode': 'linear', 'color_start': '#f7fbff', 'color_end': '#08306b'}
 
     node_sizing = next(
-        (col for col in detected_columns[:7] if 'rnaseq' in col.lower()), None
+        (col for col in cols if 'rnaseq' in col.lower()), None
     )
     return {
-        'annotations': {col: defaults[col] for col in detected_columns[:7]},
+        'annotations': {col: defaults[col] for col in cols},
         'node_sizing_column': node_sizing,
+        'truncated': len(detected_columns) > MAX_ANNOT,
     }
-
-
 
 # Internal helpers
 

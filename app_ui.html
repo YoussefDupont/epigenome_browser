@@ -11,7 +11,7 @@
     #plots-section { display: none; }
     .plot-img { max-width: 100%; border-radius: 6px; box-shadow: 0 1px 6px rgba(0,0,0,.12); }
     #status-bar { font-size: 0.88em; min-height: 1.4em; }
-    #pct-label { font-weight: 600; min-width: 3.5em; display: inline-block; }
+    #pct-label { font-weight: 600;}
     .spinner-border { width: 1.1rem; height: 1.1rem; border-width: 0.18em; vertical-align: middle; }
     .section-heading { font-size: 1.05em; font-weight: 600; color: #344; margin-bottom: 0.5rem; }
     /* Solver radio group */
@@ -107,20 +107,28 @@
             <button type="button" class="warn-dismiss" onclick="document.getElementById('warn-3d-banner').style.display='none';" aria-label="Dismiss">✕</button>
           </div>
         </div>
-        <div class="mt-3 d-flex align-items-center gap-3">
-          <button type="submit" class="btn btn-primary px-4" id="upload-btn">
-            <span id="upload-spinner" class="spinner-border me-1 d-none" role="status"></span>
-            Load &amp; Analyze
-          </button>
-          <span id="status-bar" class="text-muted"></span>
-          <span id="step1-elapsed-label" class="text-muted" style="font-size:0.88em;"></span>
-          <button class="btn btn-outline-primary px-4 ms-auto" id="download-json-btn" type="button" style="display:none;">
-            Download JSON
-          </button>
+        <div class="mt-3 flex-column gap-2">
+            <div class="d-flex align-items-baseline gap-3">
+              <button type="submit" class="btn btn-primary px-4" id="upload-btn">
+                  <span id="upload-spinner" class="spinner-border me-1 d-none" role="status"></span>
+                  Load &amp; Analyze
+              </button>
+              <span id="status-bar" class="text-muted"></span>
+              <span id="step1-elapsed-label" class="text-muted" style="font-size:0.88em"></span>
+              <div class="flex-column gap-1" id="download-json-wrapper" style="display:none; margin-left:auto">
+                <div class="d-flex align-items-center gap-2">
+                  <input type="text" id="download-filename-input" class="d-flex form-control form-control-sm" placeholder="network" style="width:160px" aria-label="Download filename">
+                  <span class="text-muted" style="font-size:0.88em">.json</span>
+                </div>
+                <button class="btn btn-outline-primary px-4" id="download-json-btn" type="button">
+                  Download JSON
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </form>
     </div>
-  </div>
   
   <!-- Chromosome selection card (for multi-chromosome uploads) -->
   <div class="card shadow-sm mb-4" id="chromosome-selection-section" style="display:none">
@@ -196,8 +204,14 @@
         <p class="text-muted mb-3">Select which annotation columns to include and how to display them.</p>
         
         <div class="mb-3">
-          <label class="form-label fw-semibold">Available Annotations (select up to 7)</label>
+          <label class="form-label fw-semibold">Available Annotations <span class="text-muted fw-normal">(select up to 7)</span></label>
           <div id="annotations-checkboxes" class="row g-2"></div>
+          <div id="annot-limit-msg" class="text-danger mt-1" style="font-size:0.88em;display:none">
+            !!! Maximum 7 annotations selected. Deselect one before adding another.
+          </div>
+          <div id="annot-truncated-msg" class="text-warning mt-1" style="font-size:0.88em;display:none">
+            Annotation list was truncated to 15 columns
+          </div>
         </div>
 
         <div class="mb-3">
@@ -306,7 +320,7 @@
     document.getElementById('column-review-section').style.display = 'none';
     document.getElementById('chromosome-selection-section').style.display = 'none';
     document.getElementById('plots-section').style.display = 'none';
-    document.getElementById('download-json-btn').style.display = 'none';
+    document.getElementById('download-json-wrapper').style.display = 'none';
 
     // Reset solver section visibility
     const solverSection = document.getElementById('solver-section');
@@ -405,6 +419,7 @@
   let currentPlots = {};
   let currentAnnotationStats = {};
   let availableChromosomes = [];
+  let annotationSectionListenerAttached = false;
 
   let networkTab = null;
   let _totalElapsedSec = 0;
@@ -765,7 +780,7 @@
         document.getElementById('column-review-section').style.display = 'none';
         document.getElementById('plots-section').style.display = 'none';
         document.getElementById('annotation-config-section').style.display = 'none';
-        document.getElementById('download-json-btn').style.display = 'none';
+        document.getElementById('download-json-wrapper').style.display = 'none';
         setStatus('Chromosome scan complete. Please select chromosomes to include.', false);
         toggleUploadBtn(false);
         return;
@@ -1131,10 +1146,174 @@
         document.getElementById('annotation-config-section').style.display = 'none';
         document.getElementById('genome-selection-section').style.display = 'none';
         document.getElementById('percentile-section').style.display = 'none';
-        document.getElementById('download-json-btn').style.display = 'none';
+        document.getElementById('download-json-wrapper').style.display = 'none';
         setStatus('', false);
     });
-}
+  }
+
+  document.getElementById('annotation-config-section').addEventListener('click', function (e) {
+    if (!e.target || e.target.id !== 'revise-annotations-btn') return;
+    // 1. Restore the original card body HTML first
+    document.getElementById('annotation-config-section').querySelector('.card-body').innerHTML = `
+        <h5 class="card-title mb-3">3b. Configure Annotations</h5>
+        <p class="text-muted mb-3">Select which annotation columns to include and how to display them.</p>
+        <div class="mb-3">
+            <label class="form-label fw-semibold">Available Annotations <span class="text-muted fw-normal">(select up to 7)</span></label>
+            <div id="annotations-checkboxes" class="row g-2"></div>
+            <div id="annot-limit-msg" class="text-danger mt-1" style="font-size:0.88em;display:none">
+                !!! Maximum 7 annotations selected. Deselect one before adding another.
+            </div>
+            <div id="annot-truncated-msg" class="text-warning mt-1" style="font-size:0.88em;display:none">
+                Annotation list was truncated to 15 columns
+            </div>
+        </div>
+        <div class="mb-3">
+            <label class="form-label fw-semibold">Node Sizing (percentile-scaled)</label>
+            <select class="form-select" id="node-sizing-column">
+                <option value="">Default size</option>
+            </select>
+        </div>
+        <div id="annotation-display-modes"></div>
+        <div class="d-flex justify-content-between align-items-center" style="margin-top:10px;gap:1rem">
+            <button class="btn btn-secondary px-4" id="configure-annotations-btn">
+                <span id="config-spinner" class="spinner-border me-1 d-none" role="status"></span>
+                Save Configuration
+            </button>
+        </div>
+        <div style="margin-top:0.75rem">
+            <span id="config-status-msg" style="font-size:0.88em"></span>
+        </div>`;
+    // 2. Render into restored elements
+    const cleanedNameMap = {};
+    currentColumnTransformations.forEach(item => {
+        cleanedNameMap[item.original] = columnOverrides[item.original] || item.cleaned;
+    });
+    const cleanedAnnotations = currentDetectedAnnotations.map(col => cleanedNameMap[col] || col);
+    renderAnnotationConfigWithCleanedNames(cleanedAnnotations, currentDetectedAnnotations, currentAnnotationDefaults, cleanedNameMap);
+    // 3. Hide downstream cards
+    document.getElementById('genome-selection-section').style.display = 'none';
+    document.getElementById('percentile-section').style.display = 'none';
+    setStatus('', false);
+  });
+  
+  document.getElementById('annotation-config-section').addEventListener('click', async function (e) {
+    if (!e.target || e.target.id !== 'configure-annotations-btn') return;
+    if (!sessionToken) return;
+
+    const configBtn = document.getElementById('configure-annotations-btn');
+    const configSpinner = document.getElementById('config-spinner');
+    const configStatus = document.getElementById('config-status-msg');
+
+    const selected = Array.from(document.querySelectorAll('.annotation-checkbox:checked'))
+        .map(cb => cb.dataset.column);
+    const nodeSizingCol = document.getElementById('node-sizing-column').value || null;
+
+    if (nodeSizingCol && annotationDefaults.annotations[nodeSizingCol] &&
+        annotationDefaults.annotations[nodeSizingCol].colormode === 'categorical') {
+        setStatus('Compartment annotations are categorical and cannot be used for node sizing.', false, true);
+        return;
+    }
+    if (selected.length === 0 && !nodeSizingCol) {
+        setStatus('Please select at least one annotation column for display or node sizing.', false, true);
+        return;
+    }
+
+    const annotationsConfig = {};
+    selected.forEach(function (col) {
+        const cfg = annotationDefaults.annotations[col];
+        if (cfg.colormode === 'categorical') {
+            const pickerA = document.querySelector(`input[type=color][data-column="${col}"][data-type="colorA"]`);
+            const pickerB = document.querySelector(`input[type=color][data-column="${col}"][data-type="colorB"]`);
+            annotationsConfig[col] = {
+                colormode: 'categorical',
+                colorA: pickerA ? pickerA.value : (cfg.colorA || '#ff8c00'),
+                colorB: pickerB ? pickerB.value : (cfg.colorB || '#9b30ff'),
+            };
+        } else {
+            const modeLinear = document.getElementById(`mode-linear-${col}`);
+            const mode = modeLinear && modeLinear.checked ? 'linear' : 'heatmap';
+            const colorStart = document.querySelector(`input[type=color][data-column="${col}"][data-type="start"]`);
+            const colorEnd = document.querySelector(`input[type=color][data-column="${col}"][data-type="end"]`);
+            annotationsConfig[col] = {
+                colormode: mode,
+                colorstart: colorStart ? colorStart.value : (cfg.colorstart || '#f7fbff'),
+                colorend: colorEnd ? colorEnd.value : (cfg.colorend || '#08306b'),
+            };
+        }
+    });
+    if (nodeSizingCol && !selected.includes(nodeSizingCol)) {
+        const cfg = annotationDefaults.annotations[nodeSizingCol];
+        if (cfg.colormode === 'categorical') {
+            annotationsConfig[nodeSizingCol] = {
+                colormode: 'categorical',
+                colorA: cfg.colorA || '#ff8c00',
+                colorB: cfg.colorB || '#9b30ff',
+            };
+        } else {
+            annotationsConfig[nodeSizingCol] = {
+                colormode: cfg.colormode || 'linear',
+                colorstart: cfg.colorstart || '#f7fbff',
+                colorend: cfg.colorend || '#08306b',
+            };
+        }
+    }
+    
+    const payload = {
+      token: sessionToken,
+      selected_columns: selected,
+      annotations: annotationsConfig,
+      node_sizing_column: nodeSizingCol,
+    };
+
+    if (configBtn) configBtn.disabled = true;
+    if (configSpinner) configSpinner.classList.remove('d-none');
+    if (configStatus) { configStatus.textContent = 'Saving…'; configStatus.style.color = '#555'; }
+
+    try {
+        const resp = await fetch('/configure_annotations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const result = await resp.json();
+        if (result.error) {
+            if (configStatus) { configStatus.style.color = '#dc3545'; configStatus.textContent = '✗ Error: ' + result.error; }
+        } else {
+            const savedCols = Array.from(document.querySelectorAll('.annotation-checkbox:checked'))
+                .map(cb => cb.dataset.cleaned || cb.dataset.column);
+            const nodeSizingLabel = nodeSizingCol
+                ? document.querySelector(`#node-sizing-column option[value="${nodeSizingCol}"]`)?.textContent || nodeSizingCol
+                : null;
+            collapseAnnotationCardToSummary(savedCols, nodeSizingLabel);
+            renderGenomeSelector();
+        }
+    } catch (err) {
+        if (configStatus) { configStatus.style.color = '#dc3545'; configStatus.textContent = '✗ Save failed: ' + err; }
+    } finally {
+        const btn = document.getElementById('configure-annotations-btn');
+        const sp = document.getElementById('config-spinner');
+        if (btn) btn.disabled = false;
+        if (sp) sp.classList.add('d-none');
+    }
+  });
+
+  function collapseAnnotationCardToSummary(selectedCols, nodeSizingLabel) {
+    const body = document.querySelector('#annotation-config-section .card-body');
+    const pills = selectedCols
+      .map(c => `<span class="badge bg-light text-dark border me-1">${escapeHtml(c)}</span>`)
+      .join('');
+    const sizingBadge = nodeSizingLabel
+      ? `<span class="text-muted ms-2" style="font-size:0.88em">· Sized by <strong>${escapeHtml(nodeSizingLabel)}</strong></span>`
+      : '';
+    body.innerHTML = `
+      <h5 class="card-title mb-2">3b. Annotations Configured</h5>
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+        <div>${pills}${sizingBadge}</div>
+        <button class="btn btn-sm btn-outline-secondary" id="revise-annotations-btn">
+          Revise configuration
+        </button>
+      </div>`;
+  }
 
   function escapeHtml(text) {
     const map = {
@@ -1197,7 +1376,7 @@
     document.getElementById('column-review-section').style.display = 'none';
     
     setStatus('Column names confirmed. Configure annotations and select genome.', false);
-    document.getElementById('download-json-btn').style.display = uploadWasTsvBed ? 'inline-flex' : 'none';
+    document.getElementById('download-json-wrapper').style.display = uploadWasTsvBed ? 'inline-flex' : 'none';
   }
 
   function renderAnnotationConfigWithCleanedNames(cleanedAnnotations, originalAnnotations, defaults, cleanedNameMap) {
@@ -1237,6 +1416,14 @@
     
     document.querySelectorAll('.annotation-checkbox').forEach(function(cb) {
       cb.addEventListener('change', function() {
+        const checked = document.querySelectorAll('.annotation-checkbox:checked');
+        const limitMsg = document.getElementById('annot-limit-msg');
+        if (checked.length > 7) {
+            this.checked = false;
+            if (limitMsg) limitMsg.style.display = 'block';
+            return;
+        }
+        if (limitMsg) limitMsg.style.display = 'none';
         updateAnnotationDisplayModesWithCleaned(cleanedNameMap);
       });
     });
@@ -1455,10 +1642,23 @@
 
   let annotationDefaults = null;
 
-  function downloadGraphJson() {
-    if (!sessionToken) return;
-    const url = `/download_json/${encodeURIComponent(sessionToken)}`;
-    window.location.href = url;
+  async function downloadGraphJson() {
+      if (!sessionToken) return;
+      const rawName = document.getElementById('download-filename-input').value.trim();
+      const filename = (rawName || 'network') + '.json';
+      const url = `/download_json/${encodeURIComponent(sessionToken)}`;
+      try {
+          const resp = await fetch(url);
+          if (!resp.ok) throw new Error('Download failed');
+          const blob = await resp.blob();
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = filename;
+          a.click();
+          URL.revokeObjectURL(a.href);
+      } catch (err) {
+          setStatus('Download failed: ' + err.message, false, true);
+      }
   }
 
   function renderAnnotationConfig(detectedAnnotations, defaults) {
@@ -1497,7 +1697,17 @@
     updateAnnotationDisplayModes();
     
     document.querySelectorAll('.annotation-checkbox').forEach(function(cb) {
-      cb.addEventListener('change', updateAnnotationDisplayModes);
+      cb.addEventListener('change', function() {
+        const checked = document.querySelectorAll('.annotation-checkbox:checked');
+        const limitMsg = document.getElementById('annot-limit-msg');
+        if (checked.length > 7) {
+          this.checked = false;
+          if (limitMsg) limitMsg.style.display = 'block';
+          return;
+        }
+        if (limitMsg) limitMsg.style.display = 'none';
+        updateAnnotationDisplayModes();
+      });
     });
   }
 
@@ -1586,105 +1796,6 @@
     });
   }
 
-  document.getElementById('configure-annotations-btn').addEventListener('click', async function() {
-    if (!sessionToken) return;
-    
-    const selected = Array.from(document.querySelectorAll('.annotation-checkbox:checked'))
-      .map(cb => cb.dataset.column);
-    
-    const nodeSizingCol = document.getElementById('node-sizing-column').value || null;
-    
-    if (nodeSizingCol && annotationDefaults.annotations[nodeSizingCol] && annotationDefaults.annotations[nodeSizingCol].color_mode === 'categorical') {
-      setStatus('Compartment annotations are categorical and cannot be used for node sizing.', false, true);
-      return;
-    }
-
-    if (selected.length === 0 && !nodeSizingCol) {
-      setStatus('Please select at least one annotation column for display or node sizing.', false, true);
-      return;
-    }
-    
-    const annotationsConfig = {};
-    
-    selected.forEach(function(col) {
-      const cfg = annotationDefaults.annotations[col] || {};
-      if (cfg.color_mode === 'categorical') {
-        const pickerA = document.querySelector(`input[type="color"][data-column="${col}"][data-type="color_A"]`);
-        const pickerB = document.querySelector(`input[type="color"][data-column="${col}"][data-type="color_B"]`);
-        annotationsConfig[col] = {
-          color_mode: 'categorical',
-          color_A: pickerA ? pickerA.value : (cfg.color_A || '#ff8c00'),
-          color_B: pickerB ? pickerB.value : (cfg.color_B || '#9b30ff'),
-        };
-      } else {
-        const modeLinear = document.getElementById(`mode-linear-${col}`);
-        const mode = modeLinear && modeLinear.checked ? 'linear' : 'heatmap';
-        const colorStart = document.querySelector(`input[type="color"][data-column="${col}"][data-type="start"]`);
-        const colorEnd = document.querySelector(`input[type="color"][data-column="${col}"][data-type="end"]`);
-        annotationsConfig[col] = {
-          color_mode: mode,
-          color_start: colorStart ? colorStart.value : '#f7fbff',
-          color_end: colorEnd ? colorEnd.value : '#08306b',
-        };
-      }
-    });
-    
-    if (nodeSizingCol && !selected.includes(nodeSizingCol)) {
-      const cfg = annotationDefaults.annotations[nodeSizingCol] || {};
-      if (cfg.color_mode === 'categorical') {
-        annotationsConfig[nodeSizingCol] = {
-          color_mode: 'categorical',
-          color_A: cfg.color_A || '#ff8c00',
-          color_B: cfg.color_B || '#9b30ff',
-        };
-      } else {
-        annotationsConfig[nodeSizingCol] = {
-          color_mode: cfg.color_mode || 'linear',
-          color_start: cfg.color_start || '#f7fbff',
-          color_end: cfg.color_end || '#08306b',
-        };
-      }
-    }
-    
-    const payload = {
-      token: sessionToken,
-      selected_columns: selected,
-      annotations: annotationsConfig,
-      node_sizing_column: nodeSizingCol,
-    };
-    
-    const configBtn = document.getElementById('configure-annotations-btn');
-    const configStatus = document.getElementById('config-status-msg');
-    configBtn.disabled = true;
-    document.getElementById('config-spinner').classList.remove('d-none');
-    configStatus.textContent = 'Saving\u2026';
-    configStatus.style.color = '#555';
-
-    try {
-      const resp = await fetch('/configure_annotations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const result = await resp.json();
-      if (result.error) {
-        configStatus.style.color = '#dc3545';
-        configStatus.textContent = '\u2717 Error: ' + result.error;
-      } else {
-        configStatus.style.color = 'green';
-        configStatus.textContent = '\u2713 Configuration saved';
-        renderGenomeSelector();
-        setTimeout(() => { configStatus.textContent = ''; }, 3000);
-      }
-    } catch (err) {
-      configStatus.style.color = '#dc3545';
-      configStatus.textContent = '\u2717 Save failed: ' + err;
-    }
-
-    configBtn.disabled = false;
-    document.getElementById('config-spinner').classList.add('d-none');
-  });
-
   function setStatus(msg, spinner, isError) {
     const bar = document.getElementById('status-bar');
     bar.textContent = msg;
@@ -1716,8 +1827,12 @@
       renderAnnotationConfig(result.detected_annotations, result.annotation_defaults);
       document.getElementById('annotation-config-section').style.display = 'block';
     }
+    if (result.annotationTruncated) {
+      const msg = document.getElementById('annot-truncated-msg');
+      if (msg) msg.style.display = 'block';
+    }
     document.getElementById('plots-section').style.display = 'block';
-    document.getElementById('download-json-btn').style.display = uploadWasTsvBed ? 'inline-flex' : 'none';
+    document.getElementById('download-json-wrapper').style.display = uploadWasTsvBed ? 'inline-flex' : 'none';
     // Show genome selector if we're past annotation config
     if (document.getElementById('annotation-config-section').style.display === 'none') {
       renderGenomeSelector();
