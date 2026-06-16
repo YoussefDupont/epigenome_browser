@@ -3,9 +3,8 @@ import math
 import re
 import warnings
 from collections import defaultdict
-
+import polars as pl
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
 
 
@@ -77,8 +76,8 @@ def detect_annotation_columns(file):
     Auto-detect annotation columns from TSV header.
     Returns list of column names that appear to be annotations (excludes first 6 cols).
     """
-    df = pd.read_csv(file, sep='\t', header=0, nrows=1, low_memory=False)
-    all_cols = list(df.columns)
+    df = pl.read_csv(file, separator='\t', n_rows=1, infer_schema_length=0)
+    all_cols = df.columns
     potential_annot = all_cols[6:] if len(all_cols) > 6 else []
 
     _SKIP_RE = re.compile(r'(_[23][_\s]?$|(?<![_\d])[2-9]\d*$)')
@@ -148,14 +147,90 @@ def get_annotation_config_defaults(detected_columns):
 
 # Internal helpers
 
+def merge_graph_data_list(graph_data_list: list[dict]) -> dict:
+    """
+    Merge a list of normalised graph dicts (each with 'nodes' and 'edges' lists)
+    into a single graph dict. Nodes are de-duplicated by their 'id' field (last
+    writer wins). Edges are de-duplicated by their 'id' field; edges without an
+    'id' get one generated from source+target+weight. The first dict's top-level
+    metadata keys (annotation_config, selected_genome, chromosomes, etc.) are
+    used as the base and later dicts' annotation_config annotations are merged in.
+    """
+    if not graph_data_list:
+        raise ValueError("merge_graph_data_list: received an empty list")
+    if len(graph_data_list) == 1:
+        return graph_data_list[0]
 
-def _normalize_chrom_series(s: pd.Series) -> pd.Series:
-    """Vectorized chromosome normalisation: ensure every value starts with 'chr'."""
-    s = s.astype(str).str.strip()
-    mask = s.str.len().gt(0) & ~s.str.lower().str.startswith('chr')
-    s = s.where(~mask, 'chr' + s)
-    s = s.where(s != 'nan', '')
-    return s
+    merged_nodes: dict[str, dict] = {}   # id -> node dict
+    merged_edges: dict[str, dict] = {}   # edge_id -> edge dict
+
+    # Start from the first graph's metadata as the base
+    base = dict(graph_data_list[0])
+    merged_annotation_config = dict(base.get("annotation_config") or {})
+    merged_annotations = dict(
+        (merged_annotation_config.get("annotations") or {})
+    )
+
+    for gd in graph_data_list:
+        raw_nodes = gd.get("nodes", [])
+        if isinstance(raw_nodes, dict):
+            raw_nodes = list(raw_nodes.values())
+        for node in raw_nodes:
+            nd = node.get("data", node) if isinstance(node, dict) else {}
+            node_id = nd.get("id")
+            if node_id is None:
+                continue
+            merged_nodes[node_id] = node
+
+        raw_edges = gd.get("edges", [])
+        if isinstance(raw_edges, dict):
+            raw_edges = list(raw_edges.values())
+        for edge in raw_edges:
+            ed = edge.get("data", edge) if isinstance(edge, dict) else {}
+            edge_id = ed.get("id") or (
+                f"{ed.get('source','?')}_{ed.get('target','?')}"
+                f"_{ed.get('weight', ed.get('value', ''))}"
+            )
+            merged_edges[edge_id] = edge
+
+        # Merge annotation_config from subsequent graphs
+        ac = gd.get("annotation_config") or {}
+        for col, cfg in (ac.get("annotations") or {}).items():
+            if col not in merged_annotations:
+                merged_annotations[col] = cfg
+
+    if merged_annotation_config:
+        merged_annotation_config["annotations"] = merged_annotations
+
+    merged_chromosomes = sorted({
+        (n.get("data") or n).get("chrom")
+        for n in merged_nodes.values()
+        if (n.get("data") or n).get("chrom") is not None
+    })
+
+    result = {
+        "nodes": list(merged_nodes.values()),
+        "edges": list(merged_edges.values()),
+        "annotation_config": merged_annotation_config or None,
+        "chromosomes": merged_chromosomes,
+    }
+    # Preserve other top-level metadata from the base graph
+    for key in ("selected_genome", "_physics_solved"):
+        if key in base:
+            result[key] = base[key]
+    return result
+
+
+def _normalize_chrom_col(col: str) -> pl.Expr:
+    """Ensure chromosome values start with 'chr'"""
+    s = pl.col(col).cast(pl.Utf8).str.strip_chars()
+    return (
+        pl.when(s.str.len_chars().gt(0) & ~s.str.to_lowercase().str.starts_with("chr"))
+        .then(pl.lit("chr") + s)
+        .otherwise(s)
+        .str.replace("^nan$", "")
+        .alias(col)
+    )
 
 
 def _hex(colour_scheme):
@@ -175,64 +250,64 @@ def _lighten(hex_col):
     )
 
 
-def _build_tad_index(bed: pd.DataFrame) -> dict:
+def _build_tad_index(bed: pl.DataFrame) -> dict:
     """
     Pre-sort BED by (chr, start) and return a dict of
     {chrom: (starts_array, ends_array, global_row_indices)} for O(log n) lookup via numpy.searchsorted instead of per-node boolean indexing.
     Global row indices are the positions in the original BED dataframe (before any groupby reset), so TAD ids are unique across chromosomes
     """
     index = {}
-    for chrom, grp in bed.groupby('chr', sort=False):
-        grp_sorted = grp.sort_values('start')  # keep original index - do NOT reset_index
+    bed = bed.with_columns([
+        pl.col("start").cast(pl.Int64),
+        pl.col("end").cast(pl.Int64),
+    ])
+    for chrom in bed["chr"].unique().to_list():
+        grp = bed.filter(pl.col("chr") == chrom).sort("start")
+        global_rows = bed.with_row_index("_row").filter(
+            pl.col("chr") == chrom
+        ).sort("start")["_row"].to_numpy().astype(np.int64)
         index[chrom] = (
-            grp_sorted['start'].to_numpy(dtype=np.int64),
-            grp_sorted['end'].to_numpy(dtype=np.int64),
-            grp_sorted.index.to_numpy(dtype=np.int64),  # global BED row positions
+            grp["start"].to_numpy().astype(np.int64),
+            grp["end"].to_numpy().astype(np.int64),
+            global_rows,
         )
     return index
 
-
-def _assign_tad_vectorized(chroms: pd.Series, starts_mb: pd.Series, tad_index: dict) -> pd.Series:
+def _assign_tad_vectorized(chroms: np.ndarray, starts_mb: np.ndarray, tad_index: dict) -> np.ndarray:
     """
     Vectorized TAD assignment. Returns a Series of 1-based TAD indices (0 = unassigned).
     Groups nodes by chromosome and uses searchsorted for O(n log m) total cost
     instead of O(n * m) from per-row boolean indexing.
     """
-    result = pd.Series(0, index=chroms.index, dtype=np.int64)
+    result = np.zeros(len(chroms), dtype=np.int64)
     starts_bp = (starts_mb * 1_000_000).round().astype(np.int64)
 
-    node_chroms = set(chroms.unique()) - {''}
+    node_chroms = set(chroms) - {""}
     missing_chroms = node_chroms - set(tad_index.keys())
     if missing_chroms:
         warnings.warn(
             f"TAD index has no entries for chromosome(s): "
             f"{sorted(missing_chroms)}. "
             f"Nodes on these chromosomes will be labelled 'Unassigned'.",
-            UserWarning,
-            stacklevel=2,
+            UserWarning, stacklevel=2,
         )
 
-    for chrom, grp_idx in chroms.groupby(chroms).groups.items():
+    for chrom in np.unique(chroms):
         if chrom not in tad_index:
             continue
         t_starts, t_ends, t_rows = tad_index[chrom]
-        node_starts = starts_bp.loc[grp_idx].to_numpy(dtype=np.int64)
+        mask = chroms == chrom
+        node_starts = starts_bp[mask]
 
-        # searchsorted gives the insertion point; subtract 1 to get the candidate interval
-        pos = np.searchsorted(t_starts, node_starts, side='right') - 1
+        pos = np.searchsorted(t_starts, node_starts, side="right") - 1
         valid = (pos >= 0) & (t_ends[np.clip(pos, 0, len(t_ends) - 1)] > node_starts)
-
-        # 1-based TAD id = row position in the *global* BED dataframe + 1
         tad_ids = np.where(valid, t_rows[np.clip(pos, 0, len(t_rows) - 1)] + 1, 0)
-        result.loc[grp_idx] = tad_ids
+        result[mask] = tad_ids
 
     return result
 
 
-
 # Main transform
-
-
 def transform_data(file, bed_file, top_pct=100, max_degree=100,
                    annotation_config=None, chromosomes=None):
     """
@@ -255,61 +330,48 @@ def transform_data(file, bed_file, top_pct=100, max_degree=100,
         list are kept. Values should already be normalised (e.g. 'chr1', 'chrX').
         When None, all chromosomes are included.
     """
-
     # 1. Read TSV
+    _header = pl.read_csv(file, separator='\t', n_rows=0, infer_schema_length=0).columns
+    if annotation_config is not None:
+        _annot_cols = [c for c in _header[6:] if c in annotation_config.get('annotations', {})]
+    else:
+        # Auto-detect now so we know which columns to load
+        _detected = detect_annotation_columns(file)
+        annotation_config = get_annotation_config_defaults(_detected)
+        _annot_cols = [c for c in _header[6:] if c in annotation_config.get('annotations', {})]
+
+    _needed = _header[:6] + _annot_cols
+    if 'gene_names_1' in _header:
+        _needed.append('gene_names_1')
+
+    lf = pl.scan_csv(file, separator='\t', infer_schema_length=0).select(_needed)
+    raw_col = _needed[0]
+    sec_col_name = next((c for c in _needed if c.lower() in ('chr2','chr_b','chr_2','chrb')), None)
+
+    # Normalize chromosome columns
+    lf = lf.with_columns(_normalize_chrom_col(raw_col))
+    if sec_col_name:
+        lf = lf.with_columns(_normalize_chrom_col(sec_col_name))
+
     if chromosomes:
         allowed = set(chromosomes)
-        _CHUNK = 500_000
-        kept_chunks = []
-        for chunk in pd.read_csv(file, sep='\t', header=0,
-                                 low_memory=False, chunksize=_CHUNK):
-            raw_col = chunk.columns[0]
-            chunk[raw_col] = _normalize_chrom_series(chunk[raw_col])
-            sec_col_chunk = next(
-                (c for c in chunk.columns
-                 if c.lower() in ('chr2', 'chr_b', 'chr_2', 'chrb')),
-                None,
-            )
-            if sec_col_chunk:
-                chunk[sec_col_chunk] = _normalize_chrom_series(chunk[sec_col_chunk])
-                mask = chunk[raw_col].isin(allowed) & chunk[sec_col_chunk].isin(allowed)
-            else:
-                mask = chunk[raw_col].isin(allowed)
-            filtered = chunk.loc[mask]
-            if not filtered.empty:
-                kept_chunks.append(filtered)
+        lf = lf.filter(pl.col(raw_col).is_in(allowed))
+        if sec_col_name:
+            lf = lf.filter(pl.col(sec_col_name).is_in(allowed))
 
-        if not kept_chunks:
-            raise ValueError(
-                f"No rows remain after filtering to chromosomes: {sorted(chromosomes)}"
-            )
-        df = pd.concat(kept_chunks, ignore_index=True)
-        print(f"Chromosome filter {sorted(chromosomes)}: {len(df)} rows kept")
+    df = lf.collect()
 
-        # Identify which columns were already normalised during chunked read.
-        raw_col = df.columns[0]
-        sec_col = next(
-            (c for c in df.columns if c.lower() in ('chr2', 'chr_b', 'chr_2', 'chrb')),
-            None,
-        )
-    else:
-        # No filter — read the whole file at once (original behaviour).
-        df = pd.read_csv(file, sep='\t', header=0, low_memory=False)
+    # Drop same-locus rows (start1 != start2)
+    start1_col = _needed[1]
+    start2_col = _needed[3]
+    df = df.filter(pl.col(start1_col) != pl.col(start2_col))
 
-        # Chromosome normalisation
-        raw_col = df.columns[0]
-        df[raw_col] = _normalize_chrom_series(df[raw_col])
+    if chromosomes and df.is_empty():
+        raise ValueError(f"No rows remain after filtering to chromosomes: {sorted(chromosomes)}")
 
-        sec_col = next(
-            (c for c in df.columns if c.lower() in ('chr2', 'chr_b', 'chr_2', 'chrb')),
-            None,
-        )
-        if sec_col:
-            df[sec_col] = _normalize_chrom_series(df[sec_col])
-
-    if annotation_config is None:
-        detected = detect_annotation_columns(file)
-        annotation_config = get_annotation_config_defaults(detected)
+    print(f"Loaded {len(df)} rows")
+    raw_col = df.columns[0]
+    sec_col = next((c for c in df.columns if c.lower() in ('chr2','chr_b','chr_2','chrb')), None)
 
     selected_annotations = list(annotation_config.get('annotations', {}).keys())
     node_sizing_col = annotation_config.get('node_sizing_column')
@@ -340,104 +402,132 @@ def transform_data(file, bed_file, top_pct=100, max_degree=100,
         if annotation_config.get('node_sizing_column') in _annot_rename:
             annotation_config['node_sizing_column'] = _annot_rename[annotation_config['node_sizing_column']]
 
-    df = df.rename(columns=rename_map)
+    df = df.rename(rename_map)
 
-    df['startA'] = df['start1']
-    df['endA']   = df['end1']
-    df['startB'] = df['start2']
-    df['endB']   = df['end2']
-    df['weight'] = df['contact']
+    df = df.with_columns([
+        pl.col("start1").alias("startA"),
+        pl.col("end1").alias("endA"),
+        pl.col("start2").alias("startB"),
+        pl.col("end2").alias("endB"),
+        pl.col("contact").alias("weight"),
+        pl.col("chr").alias("chrA"),
+        (pl.col("chr2") if "chr2" in df.columns else pl.col("chr")).alias("chrB"),
+    ])
 
-    if 'chr2' in df.columns:
-        df['chrA'] = df['chr']
-        df['chrB'] = df['chr2']
-    else:
-        df['chrA'] = df['chr']
-        df['chrB'] = df['chr']
-
-    df['chrA'] = _normalize_chrom_series(df['chrA'])
-    df['chrB'] = _normalize_chrom_series(df['chrB'])
-
-    df = df[df['startA'] != df['startB']]
+    df = df.filter(pl.col("startA") != pl.col("startB"))
 
     comp_cols = {c for c in selected_annotations if 'comp' in c.lower()}
     numeric_cols = ['startA', 'endA', 'startB', 'endB', 'weight'] + [c for c in selected_annotations if c not in comp_cols]
-    for c in numeric_cols:
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors='coerce')
+    cast_exprs = [
+    pl.col(c).cast(pl.Float64, strict=False).alias(c)
+    for c in numeric_cols if c in df.columns
+    ]
+    if cast_exprs:
+        df = df.with_columns(cast_exprs)
 
-    df[['startA', 'endA', 'startB', 'endB']] /= 1_000_000
+    df = df.with_columns([
+        (pl.col("startA") / 1_000_000).alias("startA"),
+        (pl.col("endA")   / 1_000_000).alias("endA"),
+        (pl.col("startB") / 1_000_000).alias("startB"),
+        (pl.col("endB")   / 1_000_000).alias("endB"),
+    ])
 
+    # 2. Vectorized node key construction
+    df = df.with_columns([
+        (pl.col("chrA") + ":" + pl.col("startA").map_elements(lambda v: f"{v:.3f}", return_dtype=pl.Utf8)
+        + "\u2013" + pl.col("endA").map_elements(lambda v: f"{v:.3f}", return_dtype=pl.Utf8)).alias("node"),
+        (pl.col("chrB") + ":" + pl.col("startB").map_elements(lambda v: f"{v:.3f}", return_dtype=pl.Utf8)
+        + "\u2013" + pl.col("endB").map_elements(lambda v: f"{v:.3f}", return_dtype=pl.Utf8)).alias("connection"),
+    ])
+    
     if top_pct < 100:
-        threshold = np.percentile(df['weight'].dropna(), 100 - top_pct)
-        df = df[df['weight'] >= threshold]
+        threshold = float(df["weight"].drop_nulls().quantile((100 - top_pct) / 100.0))
+        df = df.filter(pl.col("weight") >= threshold)
         print(f"Top {top_pct}%: {len(df)} edges (weight >= {threshold:.4f})")
 
-    # 3. Vectorized node key construction
-    def _fmt_mb(s: pd.Series) -> pd.Series:
-        return s.map('{:06.3f}'.format)
+    if max_degree < len(df):
+        # Count how many times each node appears as source or target
+        df = df.sort("weight", descending=True)
+        # Keep only edges where BOTH endpoints still have budget
+        node_edge_counts = defaultdict(int)
+        keep_indices = []
+        
+        # Sort by weight descending, greedily keep edges within degree budget
+        for i, row in enumerate(df.iter_rows(named=True)):
+            src = row["node"]
+            tgt = row["connection"]
+            if node_edge_counts[src] < max_degree and node_edge_counts[tgt] < max_degree:
+                keep_indices.append(i)
+                node_edge_counts[src] += 1
+                node_edge_counts[tgt] += 1
+        
+        df = df[keep_indices]
+        print(f"After degree cap (K={max_degree}): {len(df)} edges remaining in df")
 
-    df['node']       = df['chrA'] + ':' + _fmt_mb(df['startA']) + '\u2013' + _fmt_mb(df['endA'])
-    df['connection'] = df['chrB'] + ':' + _fmt_mb(df['startB']) + '\u2013' + _fmt_mb(df['endB'])
-
-    # 4. Build node coordinate / annotation tables
-    node_a = df[['node', 'startA', 'endA', 'chrA']].rename(
-        columns={'startA': 'start', 'endA': 'end', 'chrA': 'chrom'})
-    node_b = df[['connection', 'startB', 'endB', 'chrB']].rename(
-        columns={'connection': 'node', 'startB': 'start', 'endB': 'end', 'chrB': 'chrom'})
-
-    all_nodes_df = (
-        pd.concat([node_a, node_b], ignore_index=True)
-        .drop_duplicates('node')
-        .set_index('node')
-    )
-    node_coords = dict(zip(all_nodes_df.index, zip(all_nodes_df['start'], all_nodes_df['end'])))
-    node_chrom  = all_nodes_df['chrom'].to_dict()
+    # 5. Build node coordinate / annotation tables
+    node_a = df.select([
+        pl.col("node"), pl.col("startA").alias("start"),
+        pl.col("endA").alias("end"), pl.col("chrA").alias("chrom")
+    ])
+    node_b = df.select([
+        pl.col("connection").alias("node"), pl.col("startB").alias("start"),
+        pl.col("endB").alias("end"), pl.col("chrB").alias("chrom")
+    ])
+    all_nodes_df = pl.concat([node_a, node_b]).unique(subset=["node"])
+    node_coords = {r["node"]: (r["start"], r["end"]) for r in all_nodes_df.iter_rows(named=True)}
+    node_chrom  = {r["node"]: r["chrom"]             for r in all_nodes_df.iter_rows(named=True)}
 
     annot_cols_present = [c for c in selected_annotations if c in df.columns]
     if annot_cols_present:
-        annot_df = (
-            df[['node'] + annot_cols_present]
-            .drop_duplicates('node')
-            .set_index('node')
-        )
+        annot_pl = df.select(["node"] + annot_cols_present).unique(subset=["node"])
         for c in annot_cols_present:
             if 'comp' in c.lower():
-                annot_df[c] = annot_df[c].astype(str).where(
-                    annot_df[c].astype(str).isin(['A', 'B']), other=None)
-        node_annot = annot_df.where(annot_df.notna(), other=None).to_dict(orient='index')
+                annot_pl = annot_pl.with_columns(
+                    pl.when(pl.col(c).cast(pl.Utf8).is_in(["A", "B"]))
+                    .then(pl.col(c).cast(pl.Utf8))
+                    .otherwise(None)
+                    .alias(c)
+                )
+        node_annot = {
+            r["node"]: {c: r[c] for c in annot_cols_present}
+            for r in annot_pl.iter_rows(named=True)
+    }
     else:
         node_annot = {}
 
     if 'gene_names_1' in df.columns:
-        gene_series = (
-            df[df['gene_names_1'].notna()]
-            .groupby('node')['gene_names_1']
-            .apply(lambda x: ','.join(
-                dict.fromkeys(g.strip() for s in x for g in s.split(',') if g.strip())
-            ))
+        gene_rows = (
+            df.filter(pl.col("gene_names_1").is_not_null())
+            .select(["node", "gene_names_1"])
+            .unique(subset=["node"], keep="first")   # ← one row per node
         )
-        node_gene_values = gene_series.to_dict()
+        node_gene_values = {
+            r["node"]: ",".join(dict.fromkeys(
+                g.strip() for g in r["gene_names_1"].split(",") if g.strip()
+            ))
+            for r in gene_rows.iter_rows(named=True)
+        }
     else:
         node_gene_values = {}
-
-    # 5. TAD assignment
-    bed = pd.read_table(bed_file, header=None, names=['chr', 'start', 'end'])
-    bed['chr'] = _normalize_chrom_series(bed['chr'].astype(str))
+    
+    # 6. TAD assignment
+    bed = pl.read_csv(bed_file, separator='\t', has_header=False,
+                    new_columns=['chr','start','end'], infer_schema_length=0)
+    bed = bed.with_columns(_normalize_chrom_col('chr'))
     print(f"Loaded {len(bed)} TADs from BED file")
 
     tad_index = _build_tad_index(bed)
 
-    node_index = all_nodes_df.reset_index()
-    tad_series = _assign_tad_vectorized(
-        node_index['chrom'], node_index['start'], tad_index
-    )
-    node_tad = dict(zip(node_index['node'], tad_series))
+    chroms_arr = all_nodes_df["chrom"].to_numpy()
+    starts_arr = all_nodes_df["start"].to_numpy().astype(np.float64)
+    nodes_arr  = all_nodes_df["node"].to_numpy()
+    tad_arr    = _assign_tad_vectorized(chroms_arr, starts_arr, tad_index)
+    node_tad = {node: int(tad) for node, tad in zip(nodes_arr, tad_arr)}
 
     cluster_ids = sorted(set(node_tad.values()))
     print(f"TADs used: {cluster_ids}")
 
-    # 6. Cluster labels and colours
+    # 7. Cluster labels and colours
     cluster_node_bounds = defaultdict(list)
     cluster_chroms = defaultdict(set)
     for node, cid in node_tad.items():
@@ -468,7 +558,7 @@ def transform_data(file, bed_file, top_pct=100, max_degree=100,
     }
     cluster_colours[0] = {'base': '#aaaaaa', 'light': '#c0c0c0'}
 
-    # 7. Build node objects
+    # 8. Build node objects
     _empty_annot = {col: None for col in selected_annotations}
     network_nodes = {}
     for node, (start, end) in node_coords.items():
@@ -493,49 +583,51 @@ def transform_data(file, bed_file, top_pct=100, max_degree=100,
         network_nodes[node] = {'data': node_data}
 
     # 8. Vectorized edge building
-    df['key0'] = df[['node', 'connection']].min(axis=1)
-    df['key1'] = df[['node', 'connection']].max(axis=1)
-    df['_base_eid'] = df['key0'] + '_' + df['key1']
-    
-    rank = df.groupby('_base_eid').cumcount()  # 0-based rank per base edge id
-    df['edge_id'] = df['_base_eid'] + np.where(rank == 0, '', '_' + (rank + 1).astype(str))
+    df = df.with_columns([
+        pl.min_horizontal("node", "connection").alias("key0"),
+        pl.max_horizontal("node", "connection").alias("key1"),
+    ])
 
-    dist_mb = (df['startA'] - df['startB']).abs().round(3)
-    edges_df = df[['edge_id', 'node', 'connection', 'weight']].copy()
-    edges_df['genomic_dist_mb'] = dist_mb.values
+    df = df.with_columns(
+        (pl.col("key0") + "_" + pl.col("key1")).alias("_base_eid")
+    )
+
+    df = df.with_columns(
+        pl.col("_base_eid").cum_count().over("_base_eid").alias("_rank") - 1
+    )
+
+    df = df.with_columns(
+        pl.when(pl.col("_rank") == 0)
+        .then(pl.col("_base_eid"))
+        .otherwise(pl.col("_base_eid") + "_" + (pl.col("_rank") + 1).cast(pl.Utf8))
+        .alias("edge_id")
+    )
+
+    df = df.with_columns(
+        ((pl.col("startA") - pl.col("startB")).abs().round(3)).alias("genomic_dist_mb")
+    )
+
+    edges_df = df.select(["edge_id", "node", "connection", "weight", "genomic_dist_mb"])
+
+    eids    = edges_df["edge_id"].to_numpy()
+    nodes_  = edges_df["node"].to_numpy()
+    conns   = edges_df["connection"].to_numpy()
+    weights = edges_df["weight"].cast(pl.Float64).to_numpy()
+    dists   = edges_df["genomic_dist_mb"].cast(pl.Float64).to_numpy()
 
     network_edges = {
-        row['edge_id']: {'data': {
-            'id':               row['edge_id'],
-            'source':          f"{row['node']} Mb",
-            'target':          f"{row['connection']} Mb",
-            'weight':           float(row['weight']),
-            'genomic_dist_mb':  float(row['genomic_dist_mb']),
+        eids[i]: {'data': {
+            'id':              eids[i],
+            'source':          f"{nodes_[i]} Mb",
+            'target':          f"{conns[i]} Mb",
+            'weight':          float(weights[i]),
+            'genomic_dist_mb': float(dists[i]),
         }}
-        for row in edges_df.to_dict('records')
+        for i in range(len(eids))
     }
 
-    # 9. Degree cap
-    node_best = defaultdict(list)
-    for eid, e in network_edges.items():
-        w = e['data']['weight']
-        node_best[e['data']['source']].append((w, eid))
-        node_best[e['data']['target']].append((w, eid))
-    kept = {
-        eid
-        for wlist in node_best.values()
-        for _, eid in sorted(wlist, key=lambda x: (x[0], x[1]), reverse=True)[:max_degree]
-    }
-    network_edges = {eid: e for eid, e in network_edges.items() if eid in kept}
-    print(f"After degree cap (K={max_degree}): {len(network_edges)} edges")
 
-    referenced = (
-        {e['data']['source'] for e in network_edges.values()} |
-        {e['data']['target'] for e in network_edges.values()}
-    )
-    network_nodes = {k: v for k, v in network_nodes.items() if v['data']['id'] in referenced}
-
-    # 10. Hilbert / Cantor layout — per chromosome in a grid
+    # 9. Hilbert / Cantor layout — per chromosome in a grid
     #
     # Each chromosome gets its own independent Hilbert+Cantor curve placed
     # in a square grid of cells (CELL_W x CELL_H) with PAD pixels of gap

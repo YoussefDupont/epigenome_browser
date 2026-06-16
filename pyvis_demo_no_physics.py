@@ -28,52 +28,32 @@ def _build(data: dict, output_html: str, annotation_config=None, all_genes=None,
 
     sizing_column = annotation_config.get("node_sizing_column") if annotation_config else None
     node_data_columns = list(dict.fromkeys(annotation_columns + ([sizing_column] if sizing_column and sizing_column not in annotation_columns else [])))
-
-    # Python-side diagnostics: check what x/y look like in the data before we pass to pyvis
-    chrom_xy = defaultdict(list)
-    missing_xy = []
-    for n in data["nodes"]:
-        d = n["data"]
-        chrom = d.get("chrom") or "unknown"
-        if d.get("x") is not None and d.get("y") is not None:
-            chrom_xy[chrom].append((float(d["x"]), float(d["y"])))
-        else:
-            missing_xy.append(str(d.get("id", "?")))
-
-    print(f"[LAYOUT] Nodes with x/y: {sum(len(v) for v in chrom_xy.values())} / {len(data['nodes'])}")
-    print(f"[LAYOUT] Nodes missing x/y: {len(missing_xy)}{(' e.g. ' + str(missing_xy[:3])) if missing_xy else ''}")
-    for chrom, coords in sorted(chrom_xy.items()):
-        xs = [c[0] for c in coords]
-        ys = [c[1] for c in coords]
-        print(f"[LAYOUT]   {chrom}: {len(coords)} nodes  x=[{min(xs):.1f}, {max(xs):.1f}]  y=[{min(ys):.1f}, {max(ys):.1f}]")
-
+    
     for n in data["nodes"]:
         d = n["data"]
         node_id = str(d["id"])
-        chrom = d.get("chrom") or "unknown"
-
-        node_kwargs = dict(
-            label=d.get("label", node_id),
-            title=d.get("label", node_id),
-            color=d.get("baseColour"),
-            size=12,
-            borderWidth=1,
-            x=float(d["x"]) if d.get("x") is not None else None,
-            y=float(d["y"]) if d.get("y") is not None else None,
-            fixed={"x": not run_physics, "y": not run_physics},
-            baseColour=d.get("baseColour"),
-            baseSize=12,
-            startA=d.get("startA"),
-            endA=d.get("endA"),
-            chrom=chrom,
-            genes=d.get("genes", [])
-        )
-
+        node_entry = {
+            "id": node_id,
+            "label": d.get("label", node_id),
+            "title": d.get("label", node_id),
+            "color": d.get("baseColour"),
+            "size": 12,
+            "borderWidth": 1,
+            "x": float(d["x"]) if d.get("x") is not None else None,
+            "y": float(d["y"]) if d.get("y") is not None else None,
+            "fixed": {"x": not run_physics, "y": not run_physics},
+            "baseColour": d.get("baseColour"),
+            "baseSize": 12,
+            "startA": d.get("startA"),
+            "endA": d.get("endA"),
+            "chrom": d.get("chrom") or "unknown",
+            "genes": d.get("genes", []),
+            "group": d.get("group") or d.get("parent") or "Unassigned",
+        }
         for col in node_data_columns:
-            node_kwargs[col] = d.get(col)
-
-        node_kwargs["group"] = d.get("group") or d.get("parent") or "Unassigned"
-        net.add_node(node_id, **node_kwargs)
+            node_entry[col] = d.get(col)
+        net.node_ids.append(node_id)
+        net.nodes.append(node_entry)
 
     def _edge_weight(d):
         w = d.get("weight")
@@ -85,31 +65,25 @@ def _build(data: dict, output_html: str, annotation_config=None, all_genes=None,
             return 1.0
 
     all_weights = [_edge_weight(e["data"]) for e in data["edges"]]
-    min_len, max_len = 20, 250
     log_weights = [math.log1p(w) for w in all_weights]
-    log_min = min(log_weights)
+    log_min = min(log_weights) if log_weights else 0.0
     log_range = (max(log_weights) - log_min) or 1.0
+    min_len, max_len = 20, 250
 
-    for e in data["edges"]:
+    for e, w, lw in zip(data["edges"], all_weights, log_weights):
         d = e["data"]
-        src = str(d["source"])
-        tgt = str(d["target"])
-        w = _edge_weight(d)
-        dist_mb = float(d.get("genomic_dist_mb", d.get("genomic_distance_mb", 1.0)) or 1.0)
-        weight_strength = (math.log1p(w) - log_min) / log_range
-        spring_len = int(round(max_len - weight_strength * (max_len - min_len)))
-        edge_width = 0.6 + 1.6 * weight_strength
-
-        net.add_edge(
-            src, tgt,
-            value=w,
-            weight=w,
-            genomic_dist_mb=dist_mb,
-            physics=run_physics,
-            width=edge_width,
-            title=f"source: {src}  target: {tgt}  weight: {w:.2f}  dist: {dist_mb:.4f} Mb",
-            length=spring_len
-        )
+        weight_strength = (lw - log_min) / log_range
+        net.edges.append({
+            "from": str(d["source"]),
+            "to": str(d["target"]),
+            "value": w,
+            "weight": w,
+            "genomic_dist_mb": float(d.get("genomic_dist_mb", d.get("genomic_distance_mb", 1.0)) or 1.0),
+            "physics": run_physics,
+            "width": 0.6 + 1.6 * weight_strength,
+            "title": f"source: {d['source']}  target: {d['target']}  weight: {w:.2f}",
+            "length": int(round(max_len - weight_strength * (max_len - min_len))),
+        })
 
     """
     Per-solver physics parameters. Gravitational constant scales differ by
@@ -135,7 +109,7 @@ def _build(data: dict, output_html: str, annotation_config=None, all_genes=None,
         },
     }
 
-    # Ensure solver is valid; fall back to barnesHut if an unknown value arrives.
+    # Ensure solver is valid; fall back to barnesHut if an unknown value arrives
     if solver not in solver_params:
         solver = "barnesHut"
 
@@ -171,15 +145,12 @@ def _build(data: dict, output_html: str, annotation_config=None, all_genes=None,
     token_json = json.dumps(token) if token else 'null'
 
     try:
-        net.write_html(output_html, open_browser=False, notebook=False)
+        html_text = net.generate_html(notebook=False)
     except TypeError:
-        net.write_html(output_html, notebook=False)
-
-    html_path = Path(output_html)
-    html_text = html_path.read_text(encoding='utf-8')
+        html_text = net.generate_html()
 
     # JS diagnostics: run after vis.js network is initialised to confirm
-    # what positions and fixed state the DataSet actually has at render time.
+    # what positions and fixed state the DataSet actually has at render time
     js_diagnostics = """
 <script>
 (function() {
@@ -248,7 +219,8 @@ def _build(data: dict, output_html: str, annotation_config=None, all_genes=None,
         f'</script>\n'
         + js_diagnostics
     ) + '</head>', 1)
-    html_path.write_text(html_text, encoding='utf-8')
+    
+    Path(output_html).write_text(html_text, encoding='utf-8')
     print(f"[BUILD] Created {output_html} ({len(data['nodes'])} nodes, {len(data['edges'])} edges)")
     print(f"[BUILD] Open browser DevTools console (F12) after loading to see JS layout diagnostics")
 

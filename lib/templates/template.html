@@ -523,6 +523,7 @@
               background:#fff; border-radius:8px; padding:1.5rem; width:320px;
               box-shadow:0 8px 32px rgba(0,0,0,0.25); font-family:sans-serif;">
             <div style="font-weight:600; margin-bottom:0.75rem; font-size:1rem;">Export JSON</div>
+            <div style="margin-bottom:0.75rem; font-size:0.7rem;">This tool will export the currently filtered/physics solved selection. It can be used to view the graph in 3d in app.py or run comparisons with other datasets. Make sure to choose a unique filename.</div>
             <label style="font-size:0.88rem; color:#555; display:block; margin-bottom:0.35rem;">File name</label>
             <div style="display:flex; align-items:center; gap:0.35rem;">
               <input id="export-filename-input" type="text" placeholder="network_export"
@@ -1620,7 +1621,14 @@
                         var lbl = nd.group || 'Unassigned';
                         if (!seen[lbl]) seen[lbl] = allTadColormapColors[lbl] || nd.baseColour || '#888';
                       }
-                      var labels = Object.keys(seen).sort();
+                      var labels = Object.keys(seen).sort(function(a, b) {
+                        if (a === 'Unassigned' || a === 'Not clustered') return 1;
+                        if (b === 'Unassigned' || b === 'Not clustered') return -1;
+                        var chromA = a.split(' ')[0], chromB = b.split(' ')[0];
+                        if (chromA !== chromB) return chromA.localeCompare(chromB);
+                        var mA = a.match(/([\d]+\.[\d]+)/), mB = b.match(/([\d]+\.[\d]+)/);
+                        return (mA ? parseFloat(mA[1]) : 0) - (mB ? parseFloat(mB[1]) : 0);
+                      });
                       var tadLabels = labels.filter(function(l) { return l !== 'Unassigned' && l !== 'Not clustered'; });
                       var hasUnassigned = labels.some(function(l) { return l === 'Unassigned' || l === 'Not clustered'; });
                       tadLabels.forEach(function(lbl) {

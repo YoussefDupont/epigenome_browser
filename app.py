@@ -25,11 +25,11 @@ import re
 import tempfile
 import threading
 import shutil
-import token
 import uuid
 from pathlib import Path
 import numpy as np
-import pandas as pd
+import polars as pl
+from collections import defaultdict
 
 workspace = Path(__file__).resolve().parent
 
@@ -39,7 +39,7 @@ try:
 except ImportError:
     raise SystemExit("Flask is not installed. Run: pip install flask")
 
-from data import transform_data, detect_annotation_columns, get_annotation_config_defaults, _normalize_chrom_series
+from data import transform_data, detect_annotation_columns, get_annotation_config_defaults, _normalize_chrom_col, merge_graph_data_list
 from pyvis_demo_no_physics import build_pyvis_from_json_data
 
 
@@ -340,17 +340,14 @@ def _scan_chromosomes(token):
 
         dfs = []
         for path in tsv_paths:
-            chunk = pd.read_csv(
-                path, sep='\t', usecols=[0],
-                low_memory=False, header=0
-            )
+            chunk = pl.read_csv(path, separator='\t', columns=[0], infer_schema_length=0)
             dfs.append(chunk)
-        merged = pd.concat(dfs, ignore_index=True)
-        raw_col = merged.columns[0]
-        chroms = sorted(
-            set(_normalize_chrom_series(merged[raw_col].dropna().astype(str)))
-            - {'', 'nan'}
-        )
+            merged = pl.concat(dfs)
+            raw_col = merged.columns[0]
+            merged = merged.with_columns(_normalize_chrom_col(raw_col))
+            chroms = sorted(
+                set(merged[raw_col].drop_nulls().to_list()) - {'', 'nan'}
+)
 
         with _sessions_lock:
             s = _sessions[token]
@@ -441,25 +438,34 @@ def serve_lib(filename):
 
 @app.route("/upload", methods=["POST"])
 def upload():
-    json_file = request.files.get("json_file")
+    json_files = [f for f in request.files.getlist('json_files') if f and f.filename]
     tsv_files = request.files.getlist("tsv_files")
     bed_files = request.files.getlist("bed_files")
     max_degree = int(request.form.get("max_degree", 35))
 
     # JSON upload path (synchronous)
-    if json_file and json_file.filename:
+    if json_files:
+        parsed_graphs = []
+        for jf in json_files:
+            try:
+                gd = json.load(jf.stream)
+            except Exception as exc:
+                return jsonify({"error": f"Failed to parse JSON file '{jf.filename}': {exc}"}), 400
+            if not isinstance(gd, dict) or "nodes" not in gd or "edges" not in gd:
+                return jsonify({"error": f"JSON file '{jf.filename}' must contain top-level 'nodes' and 'edges' arrays."}), 400
+            if not isinstance(gd["nodes"], list) or not isinstance(gd["edges"], list):
+                return jsonify({"error": f"JSON file '{jf.filename}': 'nodes' and 'edges' must be arrays."}), 400
+            parsed_graphs.append(gd)
+
+        # Merge multiple graphs
         try:
-            graph_data = json.load(json_file.stream)
+            graph_data_raw = merge_graph_data_list(parsed_graphs)
         except Exception as exc:
-            return jsonify({"error": f"Failed to parse JSON file: {exc}"}), 400
+            return jsonify({"error": f"Failed to merge JSON files: {exc}"}), 400
 
-        if not isinstance(graph_data, dict) or "nodes" not in graph_data or "edges" not in graph_data:
-            return jsonify({"error": "JSON must contain top-level 'nodes' and 'edges' arrays."}), 400
-        if not isinstance(graph_data["nodes"], list) or not isinstance(graph_data["edges"], list):
-            return jsonify({"error": "JSON fields 'nodes' and 'edges' must be arrays."}), 400
+        embedded_annotation_config = graph_data_raw.get("annotation_config")
+        graph_data = _normalize_graph_data(graph_data_raw)
 
-        embedded_annotation_config = graph_data.get("annotation_config")
-        graph_data = _normalize_graph_data(graph_data)
         if not graph_data["nodes"] or not graph_data["edges"]:
             return jsonify({"error": "No valid nodes/edges found after parsing input."}), 400
 
@@ -469,7 +475,7 @@ def upload():
             detected_annotations = list(annotation_config.get("annotations", {}).keys())
         else:
             annotation_config = get_annotation_config_defaults(detected_annotations) if detected_annotations else None
-            annotation_truncated = annotation_config.pop('truncated', False) if annotation_config else False
+        annotation_truncated = annotation_config.pop('truncated', False) if annotation_config else False
 
         available_chromosomes = sorted({
             (n.get('data') or n).get('chrom')
@@ -477,11 +483,12 @@ def upload():
             if ((n.get('data') or n).get('chrom') is not None)
         })
 
-        token = str(uuid.uuid4())
-        is_export = bool(graph_data.get('_physics_solved'))
+        session_token = str(uuid.uuid4())
+        # _physics_solved is only true if ALL merged graphs had it set
+        is_export = all(bool(gd.get('_physics_solved')) for gd in parsed_graphs)
 
         with _sessions_lock:
-            _sessions[token] = {
+            _sessions[session_token] = {
                 'status': 'processing', 'stage': 'parse', 'progress': 10,
                 'error': None, 'graph_data': graph_data,
                 'network_html': None, 'network_html_lock': threading.Lock(),
@@ -492,7 +499,7 @@ def upload():
                 'uploaded_json_is_export': is_export,
                 'plots': None, 'annotation_stats': None,
                 'pct_table': None, 'column_transformations': None,
-                'file_index': None, 'file_count': None, 'is_tsv': False,
+                'file_index': None, 'file_count': len(json_files), 'is_tsv': False,
                 'annotation_truncated': annotation_truncated,
             }
 
@@ -500,19 +507,22 @@ def upload():
             can_render_3d = any(
                 ((n.get("x") is not None and n.get("y") is not None)
                 or
-                ((n.get("data") or {}).get("x") is not None and (n.get("data") or {}).get("y") is not None))
+                ((n.get("data") or {}).get("x") is not None
+                and (n.get("data") or {}).get("y") is not None))
                 for n in graph_data["nodes"]
             )
             return jsonify({
-                'token': token,
+                'token': session_token,
                 'status': 'awaiting_chromosomes',
                 'available_chromosomes': available_chromosomes,
                 'can_render_3d': can_render_3d,
             }), 200
         else:
-            t = threading.Thread(target=_process_json_upload, args=(token,), daemon=True)
+            t = threading.Thread(
+                target=_process_json_upload, args=(session_token,), daemon=True
+            )
             t.start()
-            return jsonify({'token': token, 'status': 'processing'}), 202
+            return jsonify({'token': session_token, 'status': 'processing'}), 202
 
     # # TSV + BED upload path (async) and stream files to disk immediately so they are never held as byte buffers in memory
     tsv_files = [f for f in tsv_files if f and f.filename]
@@ -678,24 +688,29 @@ def build_network():
 
     graph_data = session["graph_data"]
 
-    weights = [e["data"]["weight"] for e in graph_data["edges"]]
-    threshold = float(np.percentile(weights, 100 - top_pct)) if top_pct < 100 and weights else 0.0
-    filtered_edges = [e for e in graph_data["edges"] if e["data"]["weight"] >= threshold]
+    weights = np.array([e["data"]["weight"] for e in graph_data["edges"]])
+    if top_pct < 100 and len(weights):
+        threshold = float(np.percentile(weights, 100 - top_pct))
+        filtered_edges = [e for e, m in zip(graph_data["edges"], weights >= threshold) if m]
+    else:
+        filtered_edges = graph_data["edges"]
 
-    from collections import defaultdict
-    node_best: dict = defaultdict(list)
-    for i, e in enumerate(filtered_edges):
-        w = e["data"]["weight"]
-        node_best[e["data"]["source"]].append((w, i))
-        node_best[e["data"]["target"]].append((w, i))
-    kept_indices = {
-        i
-        for wlist in node_best.values()
-        for _, i in sorted(wlist, key=lambda x: x[0], reverse=True)[:max_degree]
-    }
-    filtered_edges = [e for i, e in enumerate(filtered_edges) if i in kept_indices]
+    sources = np.array([e["data"]["source"] for e in filtered_edges])
+    targets = np.array([e["data"]["target"] for e in filtered_edges])
+    ws      = np.array([e["data"]["weight"]  for e in filtered_edges])
+    order   = np.argsort(-ws)
 
-    referenced = {e["data"]["source"] for e in filtered_edges} | {e["data"]["target"] for e in filtered_edges}
+    degree = defaultdict(int)
+    keep   = np.zeros(len(filtered_edges), dtype=bool)
+    for i in order:
+        s, t = sources[i], targets[i]
+        if degree[s] < max_degree and degree[t] < max_degree:
+            keep[i] = True
+            degree[s] += 1
+            degree[t] += 1
+    filtered_edges = [e for e, k in zip(filtered_edges, keep) if k]
+
+    referenced    = set(sources[keep]) | set(targets[keep])
     filtered_nodes = [n for n in graph_data["nodes"] if n["data"]["id"] in referenced]
 
     filtered_data = {"nodes": filtered_nodes, "edges": filtered_edges}
@@ -819,7 +834,7 @@ def _build_upload_response(token, graph_data, plots, annotation_stats,
             cleaned = clean_annotation_name(col)
             column_transformations.append({'original': col, 'cleaned': cleaned})
 
-    can_render_3d = any(
+    can_render_3d = (not is_tsv) and any(
             ((n.get("x") is not None and n.get("y") is not None)
             or
             ((n.get("data") or {}).get("x") is not None and (n.get("data") or {}).get("y") is not None)
@@ -862,20 +877,8 @@ def _process_tsv_upload(token, tsv_paths, bed_paths, max_degree, chromosomes=Non
         tsv_path = os.path.join(tmpdir, "merged_input.tsv")
         bed_path = os.path.join(tmpdir, "merged_input.bed")
 
-        tsv_dfs = []
-        for i, p in enumerate(tsv_paths):
-            _set_progress(token, "parse", 15 + int(20 * (i / file_count)), 
-                          file_index=i+1, file_count=file_count)
-            tsv_dfs.append(pd.read_csv(p, sep='\t', low_memory=False))
-        merged_tsv = pd.concat(tsv_dfs, ignore_index=True)
-        merged_tsv.to_csv(tsv_path, sep='\t', index=False)
-
-        bed_lines = []
-        for p in bed_paths:
-            with open(p, 'r', encoding='utf-8') as fh:
-                bed_lines.extend(fh.read().strip().split('\n'))
-        with open(bed_path, 'w', encoding='utf-8') as fh:
-            fh.write('\n'.join(bed_lines))
+        tsv_path  = tsv_paths[0] if len(tsv_paths) == 1 else tsv_paths
+        bed_path  = bed_paths[0] if len(bed_paths) == 1 else bed_paths
 
         # Stage: building
         _set_progress(token, "tad", 40, file_index=None, file_count=file_count)
