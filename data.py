@@ -27,20 +27,6 @@ def _hilbert_d2xy(n_side, d):
         s *= 2
     return x, y
 
-
-def _cantor_map01_scalar(u, depth=12):
-    u = min(max(float(u), 0.0), 1.0)
-    out = 0.0
-    place = 1.0
-    for _ in range(depth):
-        u *= 2.0
-        bit = int(u)
-        u -= bit
-        place /= 3.0
-        out += (0 if bit == 0 else 2) * place
-    return out
-
-
 def _cantor_map01_vec(u_arr: np.ndarray, depth: int = 12) -> np.ndarray:
     """
     Vectorized Cantor map.  Produces bit-identical results to the scalar
@@ -57,11 +43,6 @@ def _cantor_map01_vec(u_arr: np.ndarray, depth: int = 12) -> np.ndarray:
         place /= 3.0
         out += np.where(bits == 0, 0.0, 2.0) * place
     return out
-
-def _cantor_map01(u, depth=12):
-    #Thin wrapper: scalar input → scalar output (delegates to vectorized impl)
-    return float(_cantor_map01_vec(np.array([u], dtype=np.float64), depth=depth)[0])
-
 
 # Annotation detection helpers
 

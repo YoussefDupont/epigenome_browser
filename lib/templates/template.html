@@ -227,7 +227,6 @@
              #color-mode-bar {
                  padding: 8px 12px;
                  background: #f8f9fa;
-                 border: none;
                  border-top: 1px solid #ddd;
                  margin: 8px 0;
                  display: flex;
@@ -248,13 +247,13 @@
                  flex-shrink: 0;
              }
 
-             {% if nodes|length > 100 and physics_enabled %}
+             {% if nodes|length > 5 and physics_enabled %}
              #loadingBar {
                  position:absolute;
                  top:0px;
                  left:0px;
-                 width: {{width}};
-                 height: {{height}};
+                 width: 100%;
+                 height: 100%;
                  background-color:rgba(200,200,200,0.8);
                  -webkit-transition: all 0.5s ease;
                  -moz-transition: all 0.5s ease;
@@ -262,6 +261,7 @@
                  -o-transition: all 0.5s ease;
                  transition: all 0.5s ease;
                  opacity:1;
+                 z-index: 9998;
              }
 
              #bar {
@@ -269,7 +269,7 @@
                  top:0px;
                  left:0px;
                  width:20px;
-                 height:20px;
+                 height:23px;
                  margin:auto auto auto auto;
                  border-radius:11px;
                  border:2px solid rgba(30,30,30,0.05);
@@ -279,10 +279,11 @@
 
              #border {
                  position:absolute;
-                 top:10px;
-                 left:10px;
-                 width:500px;
-                 height:23px;
+                 top: 50%;
+                 transform: translateY(-50%);
+                 left: 10px;
+                 width: 500px;
+                 height: 23px;
                  margin:auto auto auto auto;
                  box-shadow: 0px 0px 4px rgba(0,0,0,0.2);
                  border-radius:10px;
@@ -290,8 +291,7 @@
 
              #text {
                  position:absolute;
-                 top:8px;
-                 left:530px;
+                 left:525px;
                  width:30px;
                  height:50px;
                  margin:auto auto auto auto;
@@ -301,9 +301,10 @@
 
              div.outerBorder {
                  position:relative;
-                 top:400px;
+                 top: 50%;
+                 transform: translateY(-50%);
                  width:600px;
-                 height:44px;
+                 height:50px;
                  margin:auto auto auto auto;
                  border:8px solid rgba(0,0,0,0.1);
                  background: rgb(252,252,252); /* Old browsers */
@@ -354,7 +355,16 @@
 
 
     <body>
-        <div class="card vis-card-wrap" style="width: 100%">
+      <div id="physics-overlay" style="
+        position: fixed; inset: 0; z-index: 9999;
+        background: rgba(255,255,255,0.6);
+        display: flex; align-items: center; justify-content: center;
+        font-family: sans-serif; font-size: 1.1em; color: #333;
+        pointer-events: all;
+      ">
+        Solving layout, please wait…
+      </div>  
+      <div class="card vis-card-wrap" style="width: 100%">
             <!-- Color-mode toolbar -->
             <div id="color-mode-bar" class="card-header">
               <strong style="margin-right:4px">Color mode:</strong>
@@ -411,7 +421,7 @@
               <button onclick="exportNetwork()" style="font-size:0.82em;padding:3px 10px;border:1px solid #4472c4;border-radius:4px;background:#fff;color:#4472c4;cursor:pointer" title="Export physics-solved node coordinates and edges as JSON">Export JSON</button>
             </div>
             {% if select_menu or filter_menu %}
-            <div id="select-filter-bar" class="card-header" style="padding: 8px 12px;">
+            <div id="select-filter-bar" class="card-header" style="padding: 8px 12px; border-top: 1px solid #ddd;">
               <div style="display:flex;align-items:center;gap:6px;flex-wrap:nowrap;">
                 {% if select_menu %}
                 <div style="flex:1.4 1 150px;min-width:0;">
@@ -502,7 +512,7 @@
             </div>
         </div>
 
-        {% if nodes|length > 100 and physics_enabled %}
+        {% if nodes|length > 5 and physics_enabled %}
             <div id="loadingBar" style="display:none">
               <div class="outerBorder">
                 <div id="text">0%</div>
@@ -785,8 +795,19 @@
                           var seenValues = {};
                         var edgeProps = { weight: true, genomic_dist_mb: true };
                         var sourceObj = edgeProps[selectedProperty] ? allEdges : allNodes;
+                        var propAlias = {
+                            compartment: 'comp1'
+                        };
+                        var lookupProp = propAlias[selectedProperty] || selectedProperty;
                         for (let each in sourceObj) {
-                          var v = sourceObj[each][selectedProperty];
+                          var v = (selectedProperty === 'id' && sourceObj === allNodes)
+                            ? each
+                            : sourceObj[each][selectedProperty];
+                          if (selectedProperty === 'id') {
+                              v = sourceObj[each].label || sourceObj[each].title || sourceObj[each].id;
+                          } else {
+                              v = sourceObj[each][selectedProperty];
+                          }
                           if ((v === null || v === undefined || v === '') && selectedProperty === 'weight') {
                             // Backward compatibility: pyvis may store edge weight in `value`.
                             v = sourceObj[each].value;
@@ -1056,7 +1077,7 @@
                   // Note: physics enabled/disabled is controlled by the
                   // options passed into the network at creation time.
 
-                  {% if nodes|length > 100 and physics_enabled %}
+                  {% if nodes|length > 5 and physics_enabled %}
                       network.on("stabilizationProgress", function(params) {
                           if (window._perChromosomeStartup) return;
                           var loadingBar = document.getElementById('loadingBar');
@@ -1064,7 +1085,7 @@
                             loadingBar.style.display = 'block';
                             loadingBar.style.opacity = 1;
                           }
-                          var maxWidth = 496;
+                          var maxWidth = 500;
                           var minWidth = 20;
                           var widthFactor = params.iterations / params.total;
                           var width = Math.max(minWidth, maxWidth * widthFactor);
@@ -1072,7 +1093,10 @@
                           document.getElementById('text').innerHTML = Math.round(widthFactor * 100) + '%';
                       });
                       network.once("stabilizationIterationsDone", function() {
-                          if (window._perChromosomeStartup) return;
+                        var overlay = document.getElementById('physics-overlay').remove();
+                        if (overlay) overlay.remove();  
+                        
+                        if (window._perChromosomeStartup) return;
                           var loadingBar = document.getElementById('loadingBar');
                           document.getElementById('text').innerHTML = '100%';
                           document.getElementById('bar').style.width = '496px';
@@ -1126,6 +1150,7 @@
                   console.log('options.physics:', options.physics);
                   if (!physicsWanted) {
                       // Physics disabled; render diagnostics immediately.
+                      document.getElementById('physics-overlay').remove();
                       _renderLayoutDiagnostics();
                     }
 
@@ -2016,7 +2041,8 @@
                       labelsForChrom.sort(function(a,b){
                         if (a === 'Unassigned') return 1;
                         if (b === 'Unassigned') return -1;
-                        return a.localeCompare(b);
+                        var mA = a.match(/([\d]+\.[\d]+)/), mB = b.match(/([\d]+\.[\d]+)/);
+                        return (mA ? parseFloat(mA[1]) : 0) - (mB ? parseFloat(mB[1]) : 0);
                       });
                       labelsForChrom.forEach(function(lbl){ orderedLabels.push(lbl); });
                     });
@@ -2046,7 +2072,8 @@
                       var labelsForChrom = Array.from(chromMap[chrom]).sort(function(a,b){
                         if (a === 'Unassigned') return 1;
                         if (b === 'Unassigned') return -1;
-                        return a.localeCompare(b);
+                        var mA = a.match(/([\d]+\.[\d]+)/), mB = b.match(/([\d]+\.[\d]+)/);
+                        return (mA ? parseFloat(mA[1]) : 0) - (mB ? parseFloat(mB[1]) : 0);
                       });
                       labelsForChrom.forEach(function(lbl) {
                         var col = allTadColormapColors[lbl] || tadMap[lbl];
@@ -2136,8 +2163,16 @@
                         matched = filterValues.includes(rawVal.toString());
                       } else if (operator === 'gt' || operator === 'lt') {
                         if (filterValues.length === 0) continue;
+                        function extractMb(s) {
+                          var m = String(s).match(/:([\d.]+)/);
+                          return m ? parseFloat(m[1]) : parseFloat(s);
+                        }
                         var threshold = parseFloat(filterValues[0]);
                         var numVal = parseFloat(rawVal);
+                        if (isNaN(numVal) && selectedProp === 'id') {
+                        var m = rawVal.toString().match(/([\d]+\.[\d]+)\s*[–\-]/);
+                        numVal = m ? parseFloat(m[1]) : NaN;
+                        }
                         if (isNaN(threshold) || isNaN(numVal)) continue;
                         matched = operator === 'gt' ? numVal > threshold : numVal < threshold;
                       }
@@ -2480,6 +2515,10 @@
                       }
                     });
                     network.on("deselectNode", function() {
+                      network.unselectAll();
+                      if (typeof window.clearIntervalHighlight === 'function') {
+                          window.clearIntervalHighlight();
+                      }
                       if (typeof selectNodeControl !== 'undefined') {
                         selectNodeControl.setValue('', true);
                       }
