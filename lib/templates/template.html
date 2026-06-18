@@ -405,6 +405,27 @@
                 </select>
               </label>
               <div id="dynamic-color-modes"></div>
+              <div id="physics-timer-popup" style="
+                display: none;
+                align-items: center;
+                gap: 6px;
+                background: #fff;
+                border: 1px solid #ccc;
+                border-radius: 5px;
+                padding: 3px 10px 3px 10px;
+                font-size: 0.85em;
+                color: #333;
+                box-shadow: 0 2px 6px rgba(0,0,0,0.10);
+                white-space: nowrap;
+                flex-shrink: 0;
+            ">
+              Physics solved in <strong id="physics-timer-value">0.00s</strong>
+              <button onclick="document.getElementById('physics-timer-popup').style.display='none'" style="
+                  background: none; border: none; cursor: pointer;
+                  font-size: 1em; line-height: 1; color: #888;
+                  padding: 0 0 0 4px; margin: 0;
+              " title="Dismiss">✕</button>
+            </div>
               <label id="color-clamp-label" style="margin-left:12px;gap:6px;display:none">
                 <span style="white-space:nowrap">Color clamp:</span>
                 <select id="sigma-clamp" onchange="applyColorMode(document.querySelector('input[name=colorMode]:checked').value, true)"
@@ -416,7 +437,7 @@
                   <option value="5">±5σ</option>
                 </select>
               </label>
-              <button onclick="resetPositions()" style="margin-left:auto;font-size:0.82em;padding:3px 10px;border:1px solid #ccc;border-radius:4px;background:#fff;cursor:pointer">Reset Positions</button>
+              <button onclick="resetPositions()" style="margin-left:auto;font-size:0.82em;padding:3px 10px;border:1px solid #ccc;border-radius:4px;background:#fff;cursor:pointer">Restore Node Positions</button>
               <button onclick="runPhysicsOnFiltered()" style="font-size:0.82em;padding:3px 10px;border:1px solid #28a745;border-radius:4px;background:#fff;color:#28a745;cursor:pointer" title="Run physics stabilization on filtered nodes only">Rerun Physics</button>
               <button onclick="exportNetwork()" style="font-size:0.82em;padding:3px 10px;border:1px solid #4472c4;border-radius:4px;background:#fff;color:#4472c4;cursor:pointer" title="Export physics-solved node coordinates and edges as JSON">Export JSON</button>
             </div>
@@ -448,7 +469,7 @@
                   </select>
                 </div>
                 <div style="flex:0 0 auto;">
-                  <button type="button" class="btn btn-primary btn-sm" onclick="neighbourhoodHighlight({nodes: []});">Reset View</button>
+                  <button type="button" class="btn btn-primary btn-sm" onclick="neighbourhoodHighlight({nodes: []});">Reset Zoom</button>
                 </div>
                 {% endif %}
                 {% if filter_menu %}
@@ -486,7 +507,7 @@
                   <button type="button" class="btn btn-primary btn-sm" onclick="highlightFilter(filter);">Filter</button>
                 </div>
                 <div style="flex:0 0 auto;">
-                  <button type="button" class="btn btn-secondary btn-sm" onclick="clearFilter(true)">Reset</button>
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="clearFilter(true)">Clear Filter</button>
                 </div>
                 {% endif %}
               </div>
@@ -1092,8 +1113,15 @@
                           document.getElementById('bar').style.width = width + 'px';
                           document.getElementById('text').innerHTML = Math.round(widthFactor * 100) + '%';
                       });
+                      var _physicsStartTime = Date.now();
                       network.once("stabilizationIterationsDone", function() {
-                        var overlay = document.getElementById('physics-overlay').remove();
+                        var elapsedSec = ((Date.now() - _physicsStartTime) / 1000).toFixed(2);
+                        var popup = document.getElementById('physics-timer-popup');
+                        if (popup) {
+                            document.getElementById('physics-timer-value').textContent = elapsedSec + 's';
+                            popup.style.display = 'inline-flex';
+                        }
+                        var overlay = document.getElementById('physics-overlay');
                         if (overlay) overlay.remove();  
                         
                         if (window._perChromosomeStartup) return;
@@ -2452,9 +2480,10 @@
                           var numStart = +nodeStart;
                           var numEnd = +nodeEnd;
                           if (numStart < end && numEnd > start) {
+                            var liveNode = nodes.get(nid);
                             _highlightedNodesState[nid] = {
-                              color: nd.color || nd.baseColour || '#104b97',
-                              borderWidth: nd.borderWidth || 1
+                              color: liveNode ? liveNode.color : allNodes[nid].color,
+                              borderWidth: liveNode ? liveNode.borderWidth : allNodes[nid].borderWidth
                             };
                             matchedNodes.push(nid);
                             nodesToHighlight.push({id: nid, color: highlightColor, borderWidth: 3});
@@ -2480,7 +2509,15 @@
                         var nd = allNodes[nid];
                         if (matchedNodes.indexOf(nid) !== -1) {
                             var lbl = nd.hiddenLabel !== undefined ? nd.hiddenLabel : nd.label;
-                            labelUpdates.push({ id: nid, label: lbl, hiddenLabel: undefined });
+                            updates.push({
+                              id: nid,
+                              color: {
+                                background: '#ff4444',
+                                border: '#cc0000',
+                                highlight: { background: '#ff4444', border: '#cc0000' }
+                              },
+                              borderWidth: 3
+                            });
                         } else {
                             if (nd.label !== undefined) {
                                 labelUpdates.push({ id: nid, hiddenLabel: nd.label, label: undefined });
@@ -2515,7 +2552,6 @@
                       }
                     });
                     network.on("deselectNode", function() {
-                      network.unselectAll();
                       if (typeof window.clearIntervalHighlight === 'function') {
                           window.clearIntervalHighlight();
                       }

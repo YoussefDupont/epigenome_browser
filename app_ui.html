@@ -520,7 +520,7 @@
       document.getElementById('warn-3d-text').textContent =
         'This file was exported without performance metadata. '
         + 'Node count cannot be estimated — 3D rendering may be slow or crash on large datasets. '
-        + 'Re-export from the current version to enable size checking. Or confirm that the file is pre-solved and contains node positions.';
+        + 'Re-export in vis.js to enable size checking or confirm that the file contains pre-solved positions.';
       warn3dBanner.style.display = 'flex';
       return;
     }
@@ -728,7 +728,7 @@
     uploadWasJson = hasJson && !isMultiJson;
     _totalElapsedSec = 0;
     const step1LabelClear = document.getElementById('step1-elapsed-label');
-    if (step1LabelClear) step1LabelClear.textContent = '';   // ← ADD: clear stale label
+    if (step1LabelClear) step1LabelClear.textContent = '';
     setStatus('Uploading and processing data\u2026', true);
     toggleUploadBtn(true);
     setStatus('Uploading and processing data\u2026', true);

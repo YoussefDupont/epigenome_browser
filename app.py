@@ -518,6 +518,15 @@ def upload():
                 'can_render_3d': can_render_3d,
             }), 200
         else:
+            can_render_3d = any(
+                ((n.get("x") is not None and n.get("y") is not None)
+                or
+                ((n.get("data") or {}).get("x") is not None
+                and (n.get("data") or {}).get("y") is not None))
+                for n in graph_data["nodes"]
+            )
+            with _sessions_lock:
+                _sessions[session_token]['can_render_3d'] = can_render_3d
             t = threading.Thread(
                 target=_process_json_upload, args=(session_token,), daemon=True
             )
@@ -994,7 +1003,7 @@ def upload_status(token):
         session["detected_annotations"],
         session["annotation_config"],
         session["available_chromosomes"],
-        is_tsv=session.get('_is_tsv', True),
+        is_tsv=session.get('_is_tsv', session.get('is_tsv', False)),
         annotation_truncated=session.get('annotation_truncated', False),
     )
     
