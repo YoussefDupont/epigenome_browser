@@ -72,13 +72,13 @@
           <div class="col-md-5">
             <label class="form-label fw-semibold" for="tsv-input">Hi-C contact file (.tsv) <span class="text-muted fw-normal">(tab-separated)</span></label>
             <input class="form-control" type="file" id="tsv-input" accept=".tsv,.txt,.csv" multiple />
-            <small class="text-muted d-block mt-1">Select one or more TSV files (up to 10). Files will be merged.</small>
+            <small class="text-muted d-block mt-1">Select up to 10 TSV files (use ctrl/command + click to select multiple). Files will be merged.</small>
             <div id="tsv-file-count" class="text-secondary small mt-1"></div>
           </div>
           <div class="col-md-5">
             <label class="form-label fw-semibold" for="bed-input">TAD file (.bed)</label>
             <input class="form-control" type="file" id="bed-input" accept=".bed,.txt" multiple />
-            <small class="text-muted d-block mt-1">Select one or more BED files (up to 10). Files will be merged.</small>
+            <small class="text-muted d-block mt-1">Select up to 10 BED files (use ctrl/command + click to select multiple). Files will be merged.</small>
             <div id="bed-file-count" class="text-secondary small mt-1"></div>
           </div>
           <div class="col-md-2">
@@ -750,6 +750,20 @@
 
     try {
       const resp = await fetch('/upload', { method: 'POST', body: fd });
+      if (!resp.ok) {
+        if (resp.status === 413) {
+          setStatus('Upload failed: File(s) exceed 10 GB limit. Please reduce file size and try again.', false, true);
+          toggleUploadBtn(false);
+          return;
+        }
+        // For other non-JSON error responses (nginx/proxy HTML pages etc.)
+        const contentType = resp.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+          setStatus(`Upload failed: Server returned HTTP ${resp.status}. The file may be too large.`, false, true);
+          toggleUploadBtn(false);
+          return;
+        }
+      }
       const initial = await resp.json();
 
       if (initial.error) {
@@ -853,7 +867,10 @@
 
     } catch (err) {
       sessionStorage.removeItem('pyvis_status');
-      setStatus('Upload failed: ' + err, false, true);
+      const msg = (err instanceof SyntaxError)
+        ? 'Upload failed: Server returned an unexpected response. The file may be too large for the server limit.'
+        : 'Upload failed: ' + err.message;
+      setStatus(msg, false, true);
     }
     toggleUploadBtn(false);
   });
@@ -882,6 +899,35 @@
     sessionStorage.removeItem('pyvis_status');
     networkTab = null;
     if (step1Label) step1Label.textContent = '';
+    document.querySelector('#annotation-config-section .card-body').innerHTML = `
+    <h5 class="card-title mb-3">3b) Configure Annotations</h5>
+    <p class="text-muted mb-3">Select which annotation columns to include and how to display them.</p>
+    <div class="mb-3">
+      <label class="form-label fw-semibold">Available Annotations <span class="text-muted fw-normal">(select up to 7)</span></label>
+      <div id="annotations-checkboxes" class="row g-2"></div>
+      <div id="annot-limit-msg" class="text-danger mt-1" style="font-size:0.88em;display:none">
+        !!! Maximum 7 annotations selected. Deselect one before adding another.
+      </div>
+      <div id="annot-truncated-msg" class="text-warning mt-1" style="font-size:0.88em;display:none">
+        Annotation list was truncated to 15 columns
+      </div>
+    </div>
+    <div class="mb-3">
+      <label class="form-label fw-semibold">Node Sizing (percentile-scaled)</label>
+      <select class="form-select" id="node-sizing-column">
+        <option value="">Default (size=12)</option>
+      </select>
+    </div>
+    <div id="annotation-display-modes"></div>
+    <div class="d-flex justify-content-between align-items-center" style="margin-top:10px;gap:1rem">
+      <button class="btn btn-secondary px-4" id="configure-annotations-btn">
+        <span id="config-spinner" class="spinner-border me-1 d-none" role="status"></span>
+        Save Configuration
+      </button>
+    </div>
+    <div style="margin-top:0.75rem">
+      <span id="config-status-msg" style="font-size:0.88em"></span>
+    </div>`;
   });
 
   // Confirm column names button handler
@@ -1383,6 +1429,38 @@
 
   function renderAnnotationConfigWithCleanedNames(cleanedAnnotations, originalAnnotations, defaults, cleanedNameMap) {
     const checkboxesDiv = document.getElementById('annotations-checkboxes');
+    
+    if (!checkboxesDiv) {
+    document.querySelector('#annotation-config-section .card-body').innerHTML = `
+      <h5 class="card-title mb-3">3b) Configure Annotations</h5>
+      <p class="text-muted mb-3">Select which annotation columns to include and how to display them.</p>
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Available Annotations <span class="text-muted fw-normal">(select up to 7)</span></label>
+        <div id="annotations-checkboxes" class="row g-2"></div>
+        <div id="annot-limit-msg" class="text-danger mt-1" style="font-size:0.88em;display:none">
+          !!! Maximum 7 annotations selected. Deselect one before adding another.
+        </div>
+        <div id="annot-truncated-msg" class="text-warning mt-1" style="font-size:0.88em;display:none">
+          Annotation list was truncated to 15 columns
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Node Sizing (percentile-scaled)</label>
+        <select class="form-select" id="node-sizing-column">
+          <option value="">Default (size=12)</option>
+        </select>
+      </div>
+      <div id="annotation-display-modes"></div>
+      <div class="d-flex justify-content-between align-items-center" style="margin-top:10px;gap:1rem">
+        <button class="btn btn-secondary px-4" id="configure-annotations-btn">
+          <span id="config-spinner" class="spinner-border me-1 d-none" role="status"></span>
+          Save Configuration
+        </button>
+      </div>
+      <div style="margin-top:0.75rem">
+        <span id="config-status-msg" style="font-size:0.88em"></span>
+      </div>`;
+    }
     checkboxesDiv.innerHTML = '';
     
     const maxAnnotations = 7;

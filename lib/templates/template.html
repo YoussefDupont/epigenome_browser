@@ -362,7 +362,7 @@
         font-family: sans-serif; font-size: 1.1em; color: #333;
         pointer-events: all;
       ">
-        Solving layout, please wait…
+        Solving layout, please keep the window focused to reduce wait times…
       </div>  
       <div class="card vis-card-wrap" style="width: 100%">
             <!-- Color-mode toolbar -->
@@ -603,7 +603,8 @@
                   value : []
               };
               var allTadColormapColors = {};  // Stores TAD label → color mapping for current colormap
-              var _globalGeneOptions = []; 
+              var _globalGeneOptions = [];
+              var _highlightedNodesState = {};  // Maps nodeId -> {color, borderWidth}
               
               // Gradient-based colormaps: each colormap is defined as key color stops
               var tadColormaps = {
@@ -756,36 +757,73 @@
                   window.geneToRanges = {};
 
                   function onGeneSearchChange(geneName) {
-                      window._activeGeneSearchName = geneName || null;
-                      if (!geneName) return;
+                    window._activeGeneSearchName = geneName || null;
+                    if (!geneName) return;
 
-                      var range = (window.geneToRanges && window.geneToRanges[geneName]) || null;
+                    var range = (window.geneToRanges && window.geneToRanges[geneName]) || null;
 
-                      var nodeIds = window.geneToNodes[geneName] || [];
-                      if (!nodeIds.length) {
-                          geneSearchControl.clear();
-                          return;
-                      }
+                    var nodeIds = window.geneToNodes[geneName] || [];
+                    if (!nodeIds.length) {
+                        geneSearchControl.clear();
+                        return;
+                    }
 
-                      // Highlight all matching nodes for this gene.
-                      selectNode(nodeIds);
+                    var geneNodeSet = {};
+                    nodeIds.forEach(function(nid) { geneNodeSet[nid] = true; });
 
-                      // Sync the dropdown and metadata state to a representative node.
-                      var representative = nodeIds[0];
-                      if (typeof selectNodeControl !== 'undefined') {
-                          selectNodeControl.setValue(representative, true);
-                      }
-                      if (typeof window.setPopupNodeId === 'function') {
-                          window.setPopupNodeId(representative);
-                      }
-                      if (typeof window.buildMetadataPopup === 'function') {
-                          window.buildMetadataPopup(representative);
-                      }
-                      if (typeof window.fetchGenesForNode === 'function') {
-                          window.fetchGenesForNode(representative);
-                      }
+                    // Get fresh node state
+                    allNodes = nodes.get({ returnType: 'Object' });
+                    for (var _nid in allNodes) { delete allNodes[_nid].x; delete allNodes[_nid].y; }
 
-                      geneSearchControl.clear();
+                    highlightActive = true;
+
+                    // Grey out ALL nodes first
+                    for (var nodeId in allNodes) {
+                        allNodes[nodeId].color = 'rgba(200,200,200,0.5)';
+                        if (allNodes[nodeId].hiddenLabel === undefined) {
+                            allNodes[nodeId].hiddenLabel = allNodes[nodeId].label;
+                            allNodes[nodeId].label = undefined;
+                        }
+                    }
+
+                    // Restore original color on gene nodes only — no neighbours
+                    nodeIds.forEach(function(nid) {
+                        if (!allNodes[nid]) return;
+                        allNodes[nid].color = nodeColors[nid];
+                        if (allNodes[nid].hiddenLabel !== undefined) {
+                            allNodes[nid].label = allNodes[nid].hiddenLabel;
+                            allNodes[nid].hiddenLabel = undefined;
+                        }
+                    });
+
+                    // Push all updates
+                    var updateArray = [];
+                    for (var nodeId in allNodes) {
+                        if (allNodes.hasOwnProperty(nodeId)) updateArray.push(allNodes[nodeId]);
+                    }
+                    nodes.update(updateArray);
+
+                    // Select and zoom to gene nodes
+                    network.selectNodes(nodeIds);
+                    network.fit({ nodes: nodeIds, animation: { duration: 500, easingFunction: 'easeInOutQuad' } });
+
+
+                    // Sync the dropdown and metadata state to a representative node
+                    var representative = nodeIds[0];
+                    if (typeof selectNodeControl !== 'undefined') {
+                        selectNodeControl.setValue(representative, true);
+                    }
+                    if (typeof window.setPopupNodeId === 'function') {
+                        window.setPopupNodeId(representative);
+                    }
+                    if (typeof window.buildMetadataPopup === 'function') {
+                        window.buildMetadataPopup(representative);
+                    }
+                    if (typeof window.fetchGenesForNode === 'function') {
+                        window.fetchGenesForNode(representative);
+                    }
+
+                    geneSearchControl.clear();
                   }
               {%  endif %}
 
@@ -827,7 +865,7 @@
                           if (selectedProperty === 'id') {
                               v = sourceObj[each].label || sourceObj[each].title || sourceObj[each].id;
                           } else {
-                              v = sourceObj[each][selectedProperty];
+                              v = sourceObj[each][lookupProp];
                           }
                           if ((v === null || v === undefined || v === '') && selectedProperty === 'weight') {
                             // Backward compatibility: pyvis may store edge weight in `value`.
@@ -2427,9 +2465,6 @@
                   {% if neighborhood_highlight %}
                     network.on("click", neighbourhoodHighlight);
                   {% endif %}
-
-                  // Track highlighted nodes from gene report so we can restore their state
-                  var _highlightedNodesState = {};  // Maps nodeId -> {color, borderWidth}
 
                   // Clear highlighting and restore original node state
                   window.clearIntervalHighlight = function() {

@@ -261,7 +261,7 @@ def _assign_tad_vectorized(chroms: np.ndarray, starts_mb: np.ndarray, tad_index:
     instead of O(n * m) from per-row boolean indexing.
     """
     result = np.zeros(len(chroms), dtype=np.int64)
-    starts_bp = (starts_mb * 1_000_000).round().astype(np.int64)
+    starts_bp = np.where(np.isfinite(starts_mb),(starts_mb * 1_000_000).round(),-1).astype(np.int64)
 
     node_chroms = set(chroms) - {""}
     missing_chroms = node_chroms - set(tad_index.keys())
@@ -322,6 +322,8 @@ def transform_data(file, bed_file, top_pct=100, max_degree=100,
         _annot_cols = [c for c in _header[6:] if c in annotation_config.get('annotations', {})]
 
     _needed = _header[:6] + _annot_cols
+    if len(_header) > 6 and _header[6] not in _annot_cols:
+        _needed.insert(6, _header[6])
     if 'gene_names_1' in _header:
         _needed.append('gene_names_1')
 
@@ -360,12 +362,20 @@ def transform_data(file, bed_file, top_pct=100, max_degree=100,
     orig_cols = list(df.columns)
     selected_annotations = [c for c in selected_annotations if c in orig_cols]
 
-    base_cols = ['chr', 'start1', 'end1', 'start2', 'end2', 'contact']
-    rename_map = {orig_cols[i]: base_cols[i] for i in range(min(6, len(orig_cols)))}
-
-    sec_candidates = [c for c in orig_cols if c.lower() in ('chr2', 'chr_b', 'chr_2', 'chrb')]
-    if sec_candidates and sec_candidates[0] not in rename_map:
-        rename_map[sec_candidates[0]] = 'chr2'
+    base_cols = ['chr', 'start1', 'end1', 'chr2', 'start2', 'end2', 'contact']
+    # Find chr2 column index to build rename correctly
+    chr2_idx = next((i for i, c in enumerate(orig_cols) if c.lower() in ('chr2','chr_b','chr_2','chrb')), None)
+    if chr2_idx is not None:
+        rename_map = {orig_cols[i]: base_cols[i] for i in range(3)}
+        rename_map[orig_cols[chr2_idx]]     = 'chr2'
+        rename_map[orig_cols[chr2_idx + 1]] = 'start2'
+        rename_map[orig_cols[chr2_idx + 2]] = 'end2'
+        # Only map contact if there's a 7th coordinate column before annotations
+        contact_idx = chr2_idx + 3
+        if contact_idx < len(orig_cols) and orig_cols[contact_idx] not in _annot_cols:
+            rename_map[orig_cols[contact_idx]] = 'contact'
+    else:
+        rename_map = {orig_cols[i]: base_cols[i] for i in range(min(7, len(orig_cols)))}
 
     _annot_rename = {}
     for annot_col in selected_annotations:
@@ -390,7 +400,7 @@ def transform_data(file, bed_file, top_pct=100, max_degree=100,
         pl.col("end1").alias("endA"),
         pl.col("start2").alias("startB"),
         pl.col("end2").alias("endB"),
-        pl.col("contact").alias("weight"),
+        (pl.col("contact") if "contact" in df.columns else pl.lit(1.0)).alias("weight"),
         pl.col("chr").alias("chrA"),
         (pl.col("chr2") if "chr2" in df.columns else pl.col("chr")).alias("chrB"),
     ])
@@ -427,34 +437,41 @@ def transform_data(file, bed_file, top_pct=100, max_degree=100,
         print(f"Top {top_pct}%: {len(df)} edges (weight >= {threshold:.4f})")
 
     if max_degree < len(df):
-        # Count how many times each node appears as source or target
-        df = df.sort("weight", descending=True)
-        # Keep only edges where BOTH endpoints still have budget
-        node_edge_counts = defaultdict(int)
-        keep_indices = []
+        df = df.with_columns(
+        pl.col("weight")
+          .rank(method="ordinal", descending=True)
+          .over("node")
+          .alias("_rank_src")
+        )
+        # Rank edges per target node
+        df = df.with_columns(
+            pl.col("weight")
+            .rank(method="ordinal", descending=True)
+            .over("connection")
+            .alias("_rank_tgt")
+        )
+        # Keep edge if it is in the top max_degree for EITHER endpoint
+        df = df.filter(
+            (pl.col("_rank_src") <= max_degree) |
+            (pl.col("_rank_tgt") <= max_degree)
+        ).drop("_rank_src", "_rank_tgt")
         
-        # Sort by weight descending, greedily keep edges within degree budget
-        for i, row in enumerate(df.iter_rows(named=True)):
-            src = row["node"]
-            tgt = row["connection"]
-            if node_edge_counts[src] < max_degree and node_edge_counts[tgt] < max_degree:
-                keep_indices.append(i)
-                node_edge_counts[src] += 1
-                node_edge_counts[tgt] += 1
-        
-        df = df[keep_indices]
         print(f"After degree cap (K={max_degree}): {len(df)} edges remaining in df")
-
+    
     # 5. Build node coordinate / annotation tables
     node_a = df.select([
-        pl.col("node"), pl.col("startA").alias("start"),
-        pl.col("endA").alias("end"), pl.col("chrA").alias("chrom")
+        pl.col("node"),
+        pl.col("startA").cast(pl.Float64).alias("start"),
+        pl.col("endA").cast(pl.Float64).alias("end"),
+        pl.col("chrA").alias("chrom")
     ])
     node_b = df.select([
-        pl.col("connection").alias("node"), pl.col("startB").alias("start"),
-        pl.col("endB").alias("end"), pl.col("chrB").alias("chrom")
+        pl.col("connection").alias("node"),
+        pl.col("startB").cast(pl.Float64).alias("start"),
+        pl.col("endB").cast(pl.Float64).alias("end"),
+        pl.col("chrB").alias("chrom")
     ])
-    all_nodes_df = pl.concat([node_a, node_b]).unique(subset=["node"])
+    all_nodes_df = pl.concat([node_a, node_b]).filter(pl.col("start").is_not_null() & pl.col("end").is_not_null()).unique(subset=["node"])
     node_coords = {r["node"]: (r["start"], r["end"]) for r in all_nodes_df.iter_rows(named=True)}
     node_chrom  = {r["node"]: r["chrom"]             for r in all_nodes_df.iter_rows(named=True)}
 
@@ -521,8 +538,12 @@ def transform_data(file, bed_file, top_pct=100, max_degree=100,
         if cid == 0:
             return "Unassigned"
         bounds = cluster_node_bounds[cid]
-        lo = min(s for s, e in bounds)
-        hi = max(e for s, e in bounds)
+        starts = [s for s, e in bounds if s is not None]
+        ends   = [e for s, e in bounds if e is not None]
+        if not starts or not ends:
+            return f"Cluster {cid}"
+        lo = min(s for s, e in bounds if s is not None)
+        hi = max(e for s, e in bounds if e is not None)
         chroms = sorted(cluster_chroms[cid])
         prefix = (chroms[0] + ' ') if len(chroms) == 1 else ('+'.join(chroms) + ' ')
         return f"{prefix}{lo:06.3f}\u2013{hi:06.3f} Mb"
@@ -543,6 +564,8 @@ def transform_data(file, bed_file, top_pct=100, max_degree=100,
     _empty_annot = {col: None for col in selected_annotations}
     network_nodes = {}
     for node, (start, end) in node_coords.items():
+        if start is None or end is None:
+            continue
         cid    = node_tad[node]
         colour = cluster_colours[cid]
         ann    = node_annot.get(node, _empty_annot)

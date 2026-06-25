@@ -44,7 +44,7 @@ from pyvis_demo_no_physics import build_pyvis_from_json_data
 
 
 app = Flask(__name__, template_folder=str(workspace))
-app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024 # 2GB max upload size
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024 * 1024  # 10GB max upload size
 
 # In-memory session store: token -> {"graph_data": ..., "network_html": ..., "network_html_lock": ...}
 _sessions: dict[str, dict] = {}
@@ -883,11 +883,27 @@ def _process_tsv_upload(token, tsv_paths, bed_paths, max_degree, chromosomes=Non
         file_count = len(tsv_paths)
         # Stage: merging
         _set_progress(token, "parse", 15, file_index=0, file_count=file_count)
-        tsv_path = os.path.join(tmpdir, "merged_input.tsv")
-        bed_path = os.path.join(tmpdir, "merged_input.bed")
+        if len(tsv_paths) == 1:
+            tsv_path = tsv_paths[0]
+        else:
+            tsv_path = os.path.join(tmpdir, "merged_input.tsv")
+            with open(tsv_path, 'w', encoding='utf-8') as out_f:
+                for i, p in enumerate(tsv_paths):
+                    with open(p, 'r', encoding='utf-8') as in_f:
+                        if i == 0:
+                            out_f.write(in_f.read())
+                        else:
+                            next(in_f)  # skip header line
+                            out_f.write(in_f.read())
 
-        tsv_path  = tsv_paths[0] if len(tsv_paths) == 1 else tsv_paths
-        bed_path  = bed_paths[0] if len(bed_paths) == 1 else bed_paths
+        if len(bed_paths) == 1:
+            bed_path = bed_paths[0]
+        else:
+            bed_path = os.path.join(tmpdir, "merged_input.bed")
+            with open(bed_path, 'w', encoding='utf-8') as out_f:
+                for p in bed_paths:
+                    with open(p, 'r', encoding='utf-8') as in_f:
+                        out_f.write(in_f.read())
 
         # Stage: building
         _set_progress(token, "tad", 40, file_index=None, file_count=file_count)
