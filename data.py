@@ -364,18 +364,21 @@ def transform_data(file, bed_file, top_pct=100, max_degree=100,
 
     base_cols = ['chr', 'start1', 'end1', 'chr2', 'start2', 'end2', 'contact']
     # Find chr2 column index to build rename correctly
-    chr2_idx = next((i for i, c in enumerate(orig_cols) if c.lower() in ('chr2','chr_b','chr_2','chrb')), None)
-    if chr2_idx is not None:
-        rename_map = {orig_cols[i]: base_cols[i] for i in range(3)}
-        rename_map[orig_cols[chr2_idx]]     = 'chr2'
-        rename_map[orig_cols[chr2_idx + 1]] = 'start2'
-        rename_map[orig_cols[chr2_idx + 2]] = 'end2'
-        # Only map contact if there's a 7th coordinate column before annotations
-        contact_idx = chr2_idx + 3
-        if contact_idx < len(orig_cols) and orig_cols[contact_idx] not in _annot_cols:
-            rename_map[orig_cols[contact_idx]] = 'contact'
+    chr2_col = next((c for c in orig_cols if c.lower() in ('chr2', 'chr_b', 'chr_2', 'chrb')), None)
+
+    if chr2_col:
+        # 7-column layout: chr, start1, end1, chr2, start2, end2, contact, ...
+        chr2_idx = orig_cols.index(chr2_col)
+        base_cols = ['chr', 'start1', 'end1', 'chr2', 'start2', 'end2', 'contact']
+        coord_orig = [orig_cols[0], orig_cols[1], orig_cols[2],
+                    orig_cols[chr2_idx],
+                    orig_cols[chr2_idx + 1], orig_cols[chr2_idx + 2],
+                    orig_cols[chr2_idx + 3]]
+        rename_map = {orig_orig: base for orig_orig, base in zip(coord_orig, base_cols)}
     else:
-        rename_map = {orig_cols[i]: base_cols[i] for i in range(min(7, len(orig_cols)))}
+        # 6-column layout: chr, start1, end1, start2, end2, contact (no chr2 col)
+        base_cols = ['chr', 'start1', 'end1', 'start2', 'end2', 'contact']
+        rename_map = {orig_cols[i]: base_cols[i] for i in range(min(6, len(orig_cols)))}
 
     _annot_rename = {}
     for annot_col in selected_annotations:
