@@ -908,7 +908,10 @@ def _process_tsv_upload(token, tsv_paths, bed_paths, max_degree, chromosomes=Non
         # Stage: building
         _set_progress(token, "tad", 40, file_index=None, file_count=file_count)
         try:
-            detected_annotations = detect_annotation_columns(tsv_path)
+            first_tsv = next((p for p in tsv_paths if os.path.isfile(p)), None)
+            if first_tsv is None:
+                raise ValueError("No valid TSV file found")
+            detected_annotations = detect_annotation_columns(first_tsv)
             detected_annotations = [re.sub(r'_1$', '', col) for col in detected_annotations]
             annotation_config = get_annotation_config_defaults(detected_annotations)
             annotation_truncated = annotation_config.pop('truncated', False)
@@ -916,14 +919,41 @@ def _process_tsv_upload(token, tsv_paths, bed_paths, max_degree, chromosomes=Non
             print(f"Warning: Failed to detect annotations: {exc}")
             detected_annotations = []
             annotation_config = None
+            annotation_truncated = False
 
-        graph_data = transform_data(
-            tsv_path, bed_path,
-            top_pct=100,
-            max_degree=max_degree,
-            chromosomes=chromosomes,
-        )
+        graph_data_list = []
+        for i, tsv_path in enumerate(tsv_paths):
+            _set_progress(token, "tad", 40 + i * 10, file_index=i, file_count=file_count)
+            gd = transform_data(
+                tsv_path, bed_path,
+                top_pct=100,
+                max_degree=max_degree,
+                chromosomes=chromosomes,
+                annotation_config=None,  # auto-detect per file
+            )
+            graph_data_list.append(gd)
+
+        graph_data = merge_graph_data_list(graph_data_list) if len(graph_data_list) > 1 else graph_data_list[0]
         graph_data = _normalize_graph_data(graph_data)
+
+        # Re-offset layouts so graphs from different files don't overlap.
+        # Each file's nodes occupy a (2400 x 1600) cell; shift file i by i columns.
+        if len(graph_data_list) > 1:
+            CELL_W, PAD = 2400, 400
+            # Identify which nodes came from which file by checking x coordinate ranges
+            for file_idx, gd in enumerate(graph_data_list):
+                if file_idx == 0:
+                    continue
+                x_offset = file_idx * (CELL_W + PAD)
+                file_node_ids = {
+                    (n.get('data') or n).get('id')
+                    for n in gd.get('nodes', [])
+                }
+                for node in graph_data['nodes']:
+                    nd = node.get('data', node)
+                    if nd.get('id') in file_node_ids:
+                        if nd.get('x') is not None:
+                            nd['x'] = nd['x'] + x_offset
 
         _set_progress(token, 'layout', 60, file_index=None, file_count=file_count)
 

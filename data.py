@@ -380,6 +380,17 @@ def transform_data(file, bed_file, top_pct=100, max_degree=100,
         base_cols = ['chr', 'start1', 'end1', 'start2', 'end2', 'contact']
         rename_map = {orig_cols[i]: base_cols[i] for i in range(min(6, len(orig_cols)))}
 
+    if chr2_col:
+        _needed = list(_header[:3]) + [orig_cols[chr2_idx],
+                                        orig_cols[chr2_idx + 1],
+                                        orig_cols[chr2_idx + 2],
+                                        orig_cols[chr2_idx + 3]] + _annot_cols
+    else:
+        _needed = list(_header[:6]) + _annot_cols
+
+    if 'gene_names_1' in _header and 'gene_names_1' not in _needed:
+        _needed.append('gene_names_1')
+
     _annot_rename = {}
     for annot_col in selected_annotations:
         clean_name = re.sub(r'_1$', '', annot_col)
