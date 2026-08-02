@@ -7,6 +7,7 @@ Requirements:
 - A terminal (Command Prompt / PowerShell on Windows, Terminal on macOS/Linux)
 - Python 3.10 or newer or Miniconda/Anaconda
 - The project files (clone or download this repository)
+- deepTools installed to PATH in your system
 
 Option A - Vanilla Python (venv)
 

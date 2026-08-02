@@ -380,7 +380,7 @@ def _validate_hic_annotation_prereqs() -> None:
         raise RuntimeError(
             "Missing required external tools for Hi-C annotation: "
             + ", ".join(sorted(missing))
-            + ". Install bedtools and try again."
+            + ". Install deepTools and try again."
         )
 
 
