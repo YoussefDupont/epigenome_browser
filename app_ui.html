@@ -60,7 +60,54 @@
   <!-- Title -->
   <div class="mb-4">
     <h2 class="fw-bold mb-1">Epigenomic Network Browser</h2>
-    <p class="text-muted mb-0">Upload either a prebuilt/solved network JSON, or a Hi-C contact TSV plus TAD BED file.</p>
+    <p class="text-muted mb-0">Upload either a prebuilt/solved network JSON, or a Hi-C contact TSV + TAD BED file.</p>
+  </div>
+
+  <!-- Optional Hi-C annotation prep card -->
+  <div class="card shadow-sm mb-4" id="hic-annotation-card">
+    <div class="card-body">
+      <h5 class="card-title mb-3">Prepare Annotated Hi-C Matrix</h5>
+      <p class="text-muted mb-3">Optional preprocessing step for creating an annotated Hi-C TSV before the normal graph upload.</p>
+      <form id="hic-annotation-form" enctype="multipart/form-data">
+        <div class="row g-3 align-items-start">
+          <div class="col-md-4">
+            <label class="form-label fw-semibold" for="hic-input">Hi-C contact TSV</label>
+            <input class="form-control" type="file" id="hic-input" name="hic_file" accept=".tsv,.txt" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-semibold" for="hic-bw-input">BigWig files (up to 10)</label>
+            <input class="form-control" type="file" id="hic-bw-input" name="bigwig_files" accept=".bw,.bigWig,.bigwig" multiple />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-semibold" for="hic-threads-input">Threads</label>
+            <input class="form-control" type="number" id="hic-threads-input" name="threads" min="1" value="8" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-semibold" for="hic-comp-input">Compartment BED</label>
+            <input class="form-control" type="file" id="hic-comp-input" name="compartment_file" accept=".bed,.txt" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-semibold" for="hic-gene-input">Gene BED</label>
+            <input class="form-control" type="file" id="hic-gene-input" name="gene_file" accept=".bed,.txt" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-semibold" for="hic-chrom-sizes-input">Chrom sizes file</label>
+            <input class="form-control" type="file" id="hic-chrom-sizes-input" name="chrom_sizes_file" accept=".txt,.tsv" />
+          </div>
+        </div>
+        <div class="mt-3 d-flex align-items-center gap-3 flex-wrap">
+          <button type="submit" class="btn btn-primary px-4" id="hic-annotation-btn">
+            <span id="hic-annotation-spinner" class="spinner-border me-1 d-none" role="status"></span>
+            Prepare Hi-C Matrix
+          </button>
+          <button type="button" class="btn btn-outline-secondary px-4" id="clear-hic-btn">
+            Clear Hi-C Fields
+          </button>
+          <span id="hic-status-bar" class="text-muted" style="font-size:0.88em"></span>
+          <a id="hic-download-link" class="btn btn-outline-success px-4 d-none" href="#">Download annotated TSV</a>
+        </div>
+      </form>
+    </div>
   </div>
 
   <!-- Upload card -->
@@ -141,7 +188,7 @@
       <div id="chromosome-checkboxes" style="display:flex; flex-wrap:wrap; gap:0.5rem;"></div>
       <div style="margin-top:0.75rem; display:flex; gap:0.5rem;">
         <button class="btn btn-primary px-4" id="apply-chromosomes-btn">Apply Chromosome Selection</button>
-        <button class="btn btn-outline-secondary px-4" id="skip-chromosomes-btn">Skip (use all)</button>
+        <button class="btn btn-outline-secondary px-4" id="skip-chromosomes-btn">Use all</button>
       </div>
       <div style="margin-top:0.6rem; font-size:0.9rem; color:#374151;" id="chromosome-selection-status"></div>
     </div>
@@ -304,6 +351,17 @@
   window.addEventListener('DOMContentLoaded', function() {
     // Reset all file inputs (browser won't clear these on refresh otherwise)
     document.getElementById('upload-form').reset();
+    document.getElementById('hic-annotation-form').reset();
+
+    // Reset Hi-C form state on refresh
+    const hicStatusBar = document.getElementById('hic-status-bar');
+    if (hicStatusBar) hicStatusBar.textContent = '';
+    const hicDownloadLink = document.getElementById('hic-download-link');
+    if (hicDownloadLink) {
+      hicDownloadLink.classList.add('d-none');
+      hicDownloadLink.href = '#';
+      hicDownloadLink.textContent = 'Download annotated TSV';
+    }
 
     // Reset file count labels
     document.getElementById('tsv-file-count').textContent = '';
@@ -691,7 +749,106 @@
     }
   }
 
+  function setHicStatus(msg, spinner, isError) {
+    const el = document.getElementById('hic-status-bar');
+    if (!el) return;
+    el.textContent = msg || '';
+    el.className = 'text-muted';
+    if (isError) el.className = 'text-danger';
+    if (spinner) {
+      const spinnerEl = document.getElementById('hic-annotation-spinner');
+      if (spinnerEl) spinnerEl.classList.remove('d-none');
+    } else {
+      const spinnerEl = document.getElementById('hic-annotation-spinner');
+      if (spinnerEl) spinnerEl.classList.add('d-none');
+    }
+  }
+
+  document.getElementById('clear-hic-btn').addEventListener('click', function() {
+    document.getElementById('hic-annotation-form').reset();
+    const link = document.getElementById('hic-download-link');
+    if (link) {
+      link.classList.add('d-none');
+      link.href = '#';
+      link.textContent = 'Download annotated TSV';
+    }
+    setHicStatus('', false, false);
+  });
+
   // Upload form
+  document.getElementById('hic-annotation-form').addEventListener('submit', async function(evt) {
+    evt.preventDefault();
+    evt.stopPropagation();
+
+    const hicFile = document.getElementById('hic-input').files[0];
+    const bwFiles = Array.from(document.getElementById('hic-bw-input').files);
+    const compFile = document.getElementById('hic-comp-input').files[0];
+    const geneFile = document.getElementById('hic-gene-input').files[0];
+    const chromSizesFile = document.getElementById('hic-chrom-sizes-input').files[0];
+
+    if (!hicFile || !compFile || !geneFile || !chromSizesFile || bwFiles.length === 0) {
+      setHicStatus('Please provide all Hi-C annotation inputs before starting.', false, true);
+      return;
+    }
+
+    const fd = new FormData();
+    fd.append('hic_file', hicFile);
+    bwFiles.forEach(function(file) { fd.append('bigwig_files', file); });
+    fd.append('compartment_file', compFile);
+    fd.append('gene_file', geneFile);
+    fd.append('chrom_sizes_file', chromSizesFile);
+    fd.append('threads', document.getElementById('hic-threads-input').value || '8');
+
+    const spinner = document.getElementById('hic-annotation-spinner');
+    const btn = document.getElementById('hic-annotation-btn');
+    if (spinner) spinner.classList.remove('d-none');
+    if (btn) btn.disabled = true;
+    setHicStatus('Preparing annotated Hi-C matrix…', true, false);
+
+    try {
+      const resp = await fetch('/prepare_hic_annotation', {
+        method: 'POST',
+        body: fd,
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        throw new Error(data.error || 'Hi-C annotation request failed.');
+      }
+
+      sessionToken = data.token;
+      setHicStatus('Hi-C annotation started. Waiting for results…', true, false);
+      const poll = setInterval(async function() {
+        try {
+          const statusResp = await fetch('/hic_annotation_status/' + sessionToken);
+          const statusData = await statusResp.json();
+          if (statusData.status === 'processing') {
+            setHicStatus('Preparing annotated Hi-C matrix…', true, false);
+            return;
+          }
+          if (statusData.status === 'error') {
+            clearInterval(poll);
+            setHicStatus(statusData.error || 'Hi-C annotation failed.', false, true);
+            return;
+          }
+          clearInterval(poll);
+          const link = document.getElementById('hic-download-link');
+          link.classList.remove('d-none');
+          link.href = statusData.download_url;
+          link.textContent = 'Download annotated TSV';
+          setHicStatus('Annotated Hi-C matrix ready.', false, false);
+        } catch (err) {
+          clearInterval(poll);
+          setHicStatus('Failed to poll Hi-C annotation status: ' + err.message, false, true);
+        }
+      }, 1500);
+    } catch (err) {
+      setHicStatus(err.message || 'Failed to prepare Hi-C matrix.', false, true);
+    } finally {
+      if (spinner) spinner.classList.add('d-none');
+      if (btn) btn.disabled = false;
+    }
+  });
+
   document.getElementById('upload-form').addEventListener('submit', async function(evt) {
     evt.preventDefault();
     evt.stopPropagation();
@@ -1180,7 +1337,7 @@
             <div id="chromosome-checkboxes" style="display:flex;flex-wrap:wrap;gap:0.5rem"></div>
             <div style="margin-top:0.75rem;display:flex;gap:0.5rem">
                 <button class="btn btn-primary px-4" id="apply-chromosomes-btn">Apply Chromosome Selection</button>
-                <button class="btn btn-outline-secondary px-4" id="skip-chromosomes-btn">Skip (use all)</button>
+                <button class="btn btn-outline-secondary px-4" id="skip-chromosomes-btn">Use all</button>
             </div>
             <div style="margin-top:0.6rem;font-size:0.9rem;color:#374151" id="chromosome-selection-status"></div>`;
 

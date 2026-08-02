@@ -22,12 +22,14 @@ import json
 import math
 import os
 import re
+import subprocess
 import tempfile
 import threading
 import shutil
 import uuid
 from pathlib import Path
 import numpy as np
+import pandas as pd
 import polars as pl
 from collections import defaultdict
 
@@ -364,6 +366,208 @@ def _scan_chromosomes(token):
         with _sessions_lock:
             _sessions[token]['status'] = 'error'
             _sessions[token]['error']  = str(exc)
+
+
+def _validate_hic_annotation_prereqs() -> None:
+    missing = []
+    for name, cmd in (
+        ("bedtools", "bedtools"),
+        ("multiBigwigSummary", "multiBigwigSummary"),
+    ):
+        if shutil.which(cmd) is None:
+            missing.append(name)
+    if missing:
+        raise RuntimeError(
+            "Missing required external tools for Hi-C annotation: "
+            + ", ".join(sorted(missing))
+            + ". Install bedtools and try again."
+        )
+
+
+def _annotate_hic_matrix(
+    hic_file: str,
+    bigwig_files: list[str],
+    compartment_file: str,
+    gene_file: str,
+    chrom_sizes: str,
+    output_file: str,
+    threads: int = 8,
+    prefix: str = "tmp_hic",
+):
+    _validate_hic_annotation_prereqs()
+
+    if prefix == "tmp_hic":
+        prefix = Path(hic_file).stem
+
+    bins_gene = f"{prefix}_bins_gene.bed"
+    bins_gene_names = f"{prefix}_bins_gene_names.bed"
+    bins_file = f"{prefix}_bins.bed"
+    bins_clamped = f"{prefix}_bins.clamped.bed"
+    signal_tab = f"{prefix}_signal.tab"
+    comp_ab = f"{prefix}_compAB.bed"
+    bins_comp = f"{prefix}_bins_comp.bed"
+
+    chrom_sizes_df = pd.read_csv(chrom_sizes, sep="\t", header=None, names=["chr", "size"])
+    chrom_dict = dict(zip(chrom_sizes_df["chr"], chrom_sizes_df["size"]))
+
+    cmd_bins = f"""
+    awk '{{print $1,$2,$3; print $4,$5,$6}}' OFS="\\t" {hic_file} \
+    | sort -k1,1 -k2,2n -k3,3n | uniq > {bins_file}
+    """
+    subprocess.run(cmd_bins, shell=True, check=True)
+
+    with open(bins_file) as fin, open(bins_clamped, "w") as fout:
+        for line in fin:
+            chrom, start, end = line.strip().split()[:3]
+            if chrom not in chrom_dict:
+                continue
+            chrom_end = int(chrom_dict[chrom])
+            start = max(0, int(start))
+            end = min(int(end), chrom_end)
+            if end > start:
+                fout.write(f"{chrom}\t{start}\t{end}\n")
+
+    bw_string = " ".join(bigwig_files)
+    cmd_signal = f"""
+    multiBigwigSummary BED-file \
+      --bwfiles {bw_string} \
+      --BED {bins_clamped} \
+      --outFileName {prefix}.npz \
+      --outRawCounts {signal_tab} \
+      -p {threads}
+    """
+    subprocess.run(cmd_signal, shell=True, check=True)
+
+    cmd_comp = f"""
+    awk 'BEGIN{{OFS="\\t"}} {{print $1,$2,$3,($4>0?"A":"B")}}' {compartment_file} > {comp_ab}
+    """
+    subprocess.run(cmd_comp, shell=True, check=True)
+
+    cmd_map = f"""
+    bedtools map -a {bins_clamped} -b {comp_ab} -c 4 -o mode > {bins_comp}
+    """
+    subprocess.run(cmd_map, shell=True, check=True)
+
+    cmd_gene = f"""
+    bedtools intersect -a {bins_clamped} -b {gene_file} -c > {bins_gene}
+    """
+    subprocess.run(cmd_gene, shell=True, check=True)
+
+    cmd_gene_names = f"""
+    bedtools intersect -a {bins_clamped} -b {gene_file} -wa -wb \
+    | awk 'BEGIN{{OFS="\\t"}} {{print $1,$2,$3,$12}}' \
+    | sort -k1,1 -k2,2n -k3,3n \
+    | awk 'BEGIN{{OFS="\\t"}}
+    {{
+        key=$1 FS $2 FS $3;
+        if (key==prev) {{
+            genes=genes","$4
+        }} else {{
+            if (NR>1) print prev_chr, prev_start, prev_end, genes;
+            genes=$4;
+            prev=key;
+            prev_chr=$1; prev_start=$2; prev_end=$3;
+        }}
+    }}
+    END{{print prev_chr, prev_start, prev_end, genes}}' > {bins_gene_names}
+    """
+    subprocess.run(cmd_gene_names, shell=True, check=True)
+
+    signal_df = pd.read_csv(signal_tab, sep="\t", header=0)
+    signal_df.columns = [c.replace("'", "").replace("#", "").strip() for c in signal_df.columns]
+    signal_cols = signal_df.columns[3:]
+    bw_names = [Path(x).name.replace(".bw", "").replace(".bigWig", "") for x in bigwig_files]
+    signal_df.rename(columns=dict(zip(signal_cols, bw_names)), inplace=True)
+
+    comp_df = pd.read_csv(bins_comp, sep="\t", header=None)
+    comp_df.columns = ["chr", "start", "end", "comp"]
+
+    gene_df = pd.read_csv(bins_gene, sep="\t", header=None)
+    gene_df.columns = ["chr", "start", "end", "gene_density"]
+
+    gene_names_df = pd.read_csv(bins_gene_names, sep="\t", header=None)
+    gene_names_df.columns = ["chr", "start", "end", "gene_names"]
+
+    bins_df = pd.merge(signal_df, comp_df, on=["chr", "start", "end"])
+    bins_df = pd.merge(bins_df, gene_df, on=["chr", "start", "end"])
+    bins_df = pd.merge(bins_df, gene_names_df, on=["chr", "start", "end"], how="left")
+
+    hic = pd.read_csv(hic_file, sep="\t", header=None)
+    hic.columns = ["chr", "start1", "end1", "chr2", "start2", "end2", "contact"]
+
+    bw_names = [c for c in signal_df.columns if c not in ["chr", "start", "end"]]
+    hic = hic.merge(bins_df, left_on=["chr", "start1", "end1"], right_on=["chr", "start", "end"], how="left")
+    for name in bw_names:
+        hic.rename(columns={name: f"{name}_1"}, inplace=True)
+    hic.rename(columns={"comp": "comp1", "gene_density": "gene_density_1", "gene_names": "gene_names_1"}, inplace=True)
+    hic.drop(columns=["start", "end"], inplace=True)
+
+    hic = hic.merge(
+        bins_df,
+        left_on=["chr2", "start2", "end2"],
+        right_on=["chr", "start", "end"],
+        how="left",
+        suffixes=("", "_bin2"),
+    )
+    for name in bw_names:
+        hic.rename(columns={name: f"{name}_2"}, inplace=True)
+    hic.rename(columns={"comp": "comp2", "gene_density": "gene_density_2", "gene_names": "gene_names_2"}, inplace=True)
+    hic.drop(columns=["chr_bin2", "start", "end"], inplace=True)
+
+    final_cols = ["chr", "start1", "end1", "chr2", "start2", "end2", "contact"]
+    for name in bw_names:
+        final_cols.append(f"{name}_1")
+        final_cols.append(f"{name}_2")
+    final_cols += ["comp1", "comp2", "gene_density_1", "gene_density_2", "gene_names_1", "gene_names_2"]
+
+    final = hic[final_cols]
+    final.to_csv(output_file, sep="\t", index=False)
+    return output_file
+
+
+def _run_hic_annotation_worker(token: str):
+    try:
+        _set_progress(token, "prep", 10)
+        with _sessions_lock:
+            session = _sessions[token]
+            tmpdir = session.get("_annotation_tmpdir")
+            hic_path = session.get("_annotation_hic_path")
+            bw_paths = list(session.get("_annotation_bw_paths", []))
+            comp_path = session.get("_annotation_comp_path")
+            gene_path = session.get("_annotation_gene_path")
+            chrom_sizes_path = session.get("_annotation_chrom_sizes_path")
+            threads = int(session.get("_annotation_threads", 8))
+
+        if not all([hic_path, comp_path, gene_path, chrom_sizes_path]):
+            raise RuntimeError("Incomplete Hi-C annotation payload.")
+
+        _set_progress(token, "prep", 30)
+        result_path = os.path.join(tmpdir, f"{Path(hic_path).stem}_annotated.tsv")
+        _annotate_hic_matrix(
+            hic_path,
+            bw_paths,
+            comp_path,
+            gene_path,
+            chrom_sizes_path,
+            output_file=result_path,
+            threads=threads,
+            prefix=Path(hic_path).stem,
+        )
+
+        _set_progress(token, "prep", 100)
+        with _sessions_lock:
+            _sessions[token].update(
+                status="ready",
+                stage="done",
+                progress=100,
+                annotated_hic_path=result_path,
+                annotated_hic_filename=Path(result_path).name,
+                annotation_task="hic",
+            )
+    except Exception as exc:
+        with _sessions_lock:
+            _sessions[token]["status"] = "error"
+            _sessions[token]["error"] = str(exc)
 
 
 def _kick_off_tsv_build(token, chromosomes=None):
@@ -1011,6 +1215,123 @@ def _process_tsv_upload(token, tsv_paths, bed_paths, max_degree, chromosomes=Non
             upload_tmpdir = _sessions[token].get("_upload_tmpdir")
         if upload_tmpdir:
             shutil.rmtree(upload_tmpdir, ignore_errors=True)
+
+
+@app.route("/prepare_hic_annotation", methods=["POST"])
+def prepare_hic_annotation():
+    hic_file = request.files.get("hic_file")
+    bigwig_files = request.files.getlist("bigwig_files")
+    compartment_file = request.files.get("compartment_file")
+    gene_file = request.files.get("gene_file")
+    chrom_sizes_file = request.files.get("chrom_sizes_file")
+    threads = int(request.form.get("threads", 8))
+
+    if not hic_file or not hic_file.filename or not compartment_file or not compartment_file.filename:
+        return jsonify({"error": "Please provide a Hi-C input TSV, a compartment BED, and a gene BED."}), 400
+    if not gene_file or not gene_file.filename:
+        return jsonify({"error": "Please provide a gene BED file."}), 400
+    if not chrom_sizes_file or not chrom_sizes_file.filename:
+        return jsonify({"error": "Please provide a chromosome sizes file."}), 400
+    if not bigwig_files:
+        return jsonify({"error": "Please provide at least one BigWig file."}), 400
+
+    tmpdir = tempfile.mkdtemp(prefix="hic_annotation_")
+    try:
+        hic_path = os.path.join(tmpdir, Path(hic_file.filename).name)
+        comp_path = os.path.join(tmpdir, Path(compartment_file.filename).name)
+        gene_path = os.path.join(tmpdir, Path(gene_file.filename).name)
+        chrom_sizes_path = os.path.join(tmpdir, Path(chrom_sizes_file.filename).name)
+
+        hic_file.save(hic_path)
+        compartment_file.save(comp_path)
+        gene_file.save(gene_path)
+        chrom_sizes_file.save(chrom_sizes_path)
+
+        bw_paths = []
+        for i, bw in enumerate(bigwig_files):
+            if not bw or not bw.filename:
+                continue
+            safe_name = Path(bw.filename).name
+            dest = os.path.join(tmpdir, f"bw_{i}_{safe_name}")
+            bw.save(dest)
+            bw_paths.append(dest)
+
+        if not bw_paths:
+            raise ValueError("No BigWig files were saved successfully.")
+
+        token = str(uuid.uuid4())
+        with _sessions_lock:
+            _sessions[token] = {
+                "status": "processing",
+                "stage": "prep",
+                "progress": 0,
+                "error": None,
+                "graph_data": None,
+                "network_html": None,
+                "network_html_lock": threading.Lock(),
+                "annotation_config": None,
+                "detected_annotations": None,
+                "column_overrides": {},
+                "available_chromosomes": [],
+                "plots": None,
+                "annotation_stats": None,
+                "pct_table": None,
+                "column_transformations": None,
+                "annotation_task": "hic",
+                "annotated_hic_path": None,
+                "annotated_hic_filename": None,
+                "_annotation_tmpdir": tmpdir,
+                "_annotation_hic_path": hic_path,
+                "_annotation_bw_paths": bw_paths,
+                "_annotation_comp_path": comp_path,
+                "_annotation_gene_path": gene_path,
+                "_annotation_chrom_sizes_path": chrom_sizes_path,
+                "_annotation_threads": threads,
+            }
+
+        t = threading.Thread(target=_run_hic_annotation_worker, args=(token,), daemon=True)
+        t.start()
+        return jsonify({"token": token, "status": "processing"}), 202
+    except Exception as exc:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        return jsonify({"error": f"Failed to start Hi-C annotation prep: {exc}"}), 400
+
+
+@app.route("/hic_annotation_status/<token>")
+def hic_annotation_status(token):
+    with _sessions_lock:
+        session = _sessions.get(token)
+    if session is None:
+        return jsonify({"status": "error", "error": "Unknown session token."}), 404
+
+    if session.get("status") == "processing":
+        return jsonify({
+            "status": "processing",
+            "stage": session.get("stage", "prep"),
+            "progress": session.get("progress", 0),
+        })
+    if session.get("status") == "error":
+        return jsonify({"status": "error", "error": session.get("error", "Unknown error")}), 500
+
+    return jsonify({
+        "status": "ready",
+        "token": token,
+        "download_url": f"/download_hic_annotation/{token}",
+        "filename": session.get("annotated_hic_filename"),
+        "annotated_hic_path": session.get("annotated_hic_path"),
+    })
+
+
+@app.route("/download_hic_annotation/<token>")
+def download_hic_annotation(token):
+    with _sessions_lock:
+        session = _sessions.get(token)
+    if session is None:
+        return jsonify({"error": "Unknown session token."}), 404
+    if session.get("status") != "ready" or not session.get("annotated_hic_path"):
+        return jsonify({"error": "Hi-C annotation is not ready yet."}), 400
+
+    return send_file(session["annotated_hic_path"], as_attachment=True, download_name=session["annotated_hic_filename"])
 
 
 @app.route("/upload_status/<token>")
