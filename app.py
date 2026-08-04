@@ -393,6 +393,7 @@ def _annotate_hic_matrix(
     output_file: str,
     threads: int = 8,
     prefix: str = "tmp_hic",
+    bigwig_labels: list[str] | None = None,
 ):
     _validate_hic_annotation_prereqs()
 
@@ -410,8 +411,21 @@ def _annotate_hic_matrix(
     chrom_sizes_df = pd.read_csv(chrom_sizes, sep="\t", header=None, names=["chr", "size"])
     chrom_dict = dict(zip(chrom_sizes_df["chr"], chrom_sizes_df["size"]))
 
+    expected_cols = ["chr", "start1", "end1", "chr2", "start2", "end2", "contact"]
+    hic_clean = f"{prefix}_hic_clean.tsv"
+    with open(hic_file, encoding="utf-8") as fin, open(hic_clean, "w", encoding="utf-8") as fout:
+        first_line = fin.readline()
+        first_tokens = [t.strip().lower() for t in first_line.strip().split("\t")[:len(expected_cols)]] if first_line else []
+        if first_tokens == [c.lower() for c in expected_cols]:
+            for line in fin:
+                fout.write(line)
+        else:
+            fout.write(first_line)
+            for line in fin:
+                fout.write(line)
+
     cmd_bins = f"""
-    awk '{{print $1,$2,$3; print $4,$5,$6}}' OFS="\\t" {hic_file} \
+    awk 'BEGIN{{OFS="\\t"}} {{print $1,$2,$3; print $4,$5,$6}}' {hic_clean} \
     | sort -k1,1 -k2,2n -k3,3n | uniq > {bins_file}
     """
     subprocess.run(cmd_bins, shell=True, check=True)
@@ -476,7 +490,10 @@ def _annotate_hic_matrix(
     signal_df = pd.read_csv(signal_tab, sep="\t", header=0)
     signal_df.columns = [c.replace("'", "").replace("#", "").strip() for c in signal_df.columns]
     signal_cols = signal_df.columns[3:]
-    bw_names = [Path(x).name.replace(".bw", "").replace(".bigWig", "") for x in bigwig_files]
+    if bigwig_labels:
+        bw_names = [Path(x).name.replace(".bw", "").replace(".bigWig", "") for x in bigwig_labels]
+    else:
+        bw_names = [Path(x).name.replace(".bw", "").replace(".bigWig", "") for x in bigwig_files]
     signal_df.rename(columns=dict(zip(signal_cols, bw_names)), inplace=True)
 
     comp_df = pd.read_csv(bins_comp, sep="\t", header=None)
@@ -492,8 +509,14 @@ def _annotate_hic_matrix(
     bins_df = pd.merge(bins_df, gene_df, on=["chr", "start", "end"])
     bins_df = pd.merge(bins_df, gene_names_df, on=["chr", "start", "end"], how="left")
 
-    hic = pd.read_csv(hic_file, sep="\t", header=None)
-    hic.columns = ["chr", "start1", "end1", "chr2", "start2", "end2", "contact"]
+    hic = pd.read_csv(hic_clean, sep="\t", header=None)
+    if hic.shape[1] < len(expected_cols):
+        raise ValueError(
+            "Hi-C annotation input must contain at least the expected columns: "
+            + ", ".join(expected_cols)
+        )
+    hic.columns = expected_cols + [f"extra_{i}" for i in range(hic.shape[1] - len(expected_cols))]
+    hic = hic.loc[:, expected_cols]
 
     bw_names = [c for c in signal_df.columns if c not in ["chr", "start", "end"]]
     hic = hic.merge(bins_df, left_on=["chr", "start1", "end1"], right_on=["chr", "start", "end"], how="left")
@@ -525,6 +548,16 @@ def _annotate_hic_matrix(
     return output_file
 
 
+def _sanitize_hic_download_filename(name: str | None, fallback_stem: str) -> str:
+    candidate = (name or "").strip()
+    candidate = re.sub(r"[^A-Za-z0-9_. -]", "_", candidate).strip().strip(".")
+    if not candidate:
+        candidate = fallback_stem
+    if not candidate.lower().endswith(".tsv"):
+        candidate = f"{candidate}.tsv"
+    return candidate
+
+
 def _run_hic_annotation_worker(token: str):
     try:
         _set_progress(token, "prep", 10)
@@ -533,16 +566,19 @@ def _run_hic_annotation_worker(token: str):
             tmpdir = session.get("_annotation_tmpdir")
             hic_path = session.get("_annotation_hic_path")
             bw_paths = list(session.get("_annotation_bw_paths", []))
+            bw_labels = list(session.get("_annotation_bw_labels", []))
             comp_path = session.get("_annotation_comp_path")
             gene_path = session.get("_annotation_gene_path")
             chrom_sizes_path = session.get("_annotation_chrom_sizes_path")
             threads = int(session.get("_annotation_threads", 8))
+            requested_filename = session.get("_annotation_output_filename")
 
         if not all([hic_path, comp_path, gene_path, chrom_sizes_path]):
             raise RuntimeError("Incomplete Hi-C annotation payload.")
 
         _set_progress(token, "prep", 30)
         result_path = os.path.join(tmpdir, f"{Path(hic_path).stem}_annotated.tsv")
+        prefix = os.path.join(tmpdir, Path(hic_path).stem)
         _annotate_hic_matrix(
             hic_path,
             bw_paths,
@@ -551,9 +587,11 @@ def _run_hic_annotation_worker(token: str):
             chrom_sizes_path,
             output_file=result_path,
             threads=threads,
-            prefix=Path(hic_path).stem,
+            prefix=prefix,
+            bigwig_labels=bw_labels,
         )
 
+        output_name = _sanitize_hic_download_filename(requested_filename, Path(result_path).stem)
         _set_progress(token, "prep", 100)
         with _sessions_lock:
             _sessions[token].update(
@@ -561,7 +599,7 @@ def _run_hic_annotation_worker(token: str):
                 stage="done",
                 progress=100,
                 annotated_hic_path=result_path,
-                annotated_hic_filename=Path(result_path).name,
+                annotated_hic_filename=output_name,
                 annotation_task="hic",
             )
     except Exception as exc:
@@ -1225,6 +1263,7 @@ def prepare_hic_annotation():
     gene_file = request.files.get("gene_file")
     chrom_sizes_file = request.files.get("chrom_sizes_file")
     threads = int(request.form.get("threads", 8))
+    output_filename = request.form.get("download_filename", "")
 
     if not hic_file or not hic_file.filename or not compartment_file or not compartment_file.filename:
         return jsonify({"error": "Please provide a Hi-C input TSV, a compartment BED, and a gene BED."}), 400
@@ -1248,6 +1287,7 @@ def prepare_hic_annotation():
         chrom_sizes_file.save(chrom_sizes_path)
 
         bw_paths = []
+        bw_labels = []
         for i, bw in enumerate(bigwig_files):
             if not bw or not bw.filename:
                 continue
@@ -1255,6 +1295,7 @@ def prepare_hic_annotation():
             dest = os.path.join(tmpdir, f"bw_{i}_{safe_name}")
             bw.save(dest)
             bw_paths.append(dest)
+            bw_labels.append(safe_name)
 
         if not bw_paths:
             raise ValueError("No BigWig files were saved successfully.")
@@ -1280,9 +1321,11 @@ def prepare_hic_annotation():
                 "annotation_task": "hic",
                 "annotated_hic_path": None,
                 "annotated_hic_filename": None,
+                "_annotation_output_filename": output_filename,
                 "_annotation_tmpdir": tmpdir,
                 "_annotation_hic_path": hic_path,
                 "_annotation_bw_paths": bw_paths,
+                "_annotation_bw_labels": bw_labels,
                 "_annotation_comp_path": comp_path,
                 "_annotation_gene_path": gene_path,
                 "_annotation_chrom_sizes_path": chrom_sizes_path,

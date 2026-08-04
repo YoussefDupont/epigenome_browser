@@ -80,19 +80,23 @@
           </div>
           <div class="col-md-4">
             <label class="form-label fw-semibold" for="hic-threads-input">Threads</label>
-            <input class="form-control" type="number" id="hic-threads-input" name="threads" min="1" value="8" />
+            <input class="form-control" type="number" id="hic-threads-input" name="threads" min="1" value="4" />
           </div>
           <div class="col-md-4">
             <label class="form-label fw-semibold" for="hic-comp-input">Compartment BED</label>
-            <input class="form-control" type="file" id="hic-comp-input" name="compartment_file" accept=".bed,.txt" />
+            <input class="form-control" type="file" id="hic-comp-input" name="compartment_file" accept=".bed,.txt,.bedGraph" />
           </div>
           <div class="col-md-4">
             <label class="form-label fw-semibold" for="hic-gene-input">Gene BED</label>
-            <input class="form-control" type="file" id="hic-gene-input" name="gene_file" accept=".bed,.txt" />
+            <input class="form-control" type="file" id="hic-gene-input" name="gene_file" accept=".bed,.txt,.bedGraph" />
           </div>
           <div class="col-md-4">
             <label class="form-label fw-semibold" for="hic-chrom-sizes-input">Chrom sizes file</label>
             <input class="form-control" type="file" id="hic-chrom-sizes-input" name="chrom_sizes_file" accept=".txt,.tsv" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-semibold" for="hic-download-name-input">Output TSV name</label>
+            <input class="form-control" type="text" id="hic-download-name-input" name="download_filename" placeholder="annotated_hic.tsv" />
           </div>
         </div>
         <div class="mt-3 d-flex align-items-center gap-3 flex-wrap">
@@ -798,6 +802,7 @@
     fd.append('gene_file', geneFile);
     fd.append('chrom_sizes_file', chromSizesFile);
     fd.append('threads', document.getElementById('hic-threads-input').value || '8');
+    fd.append('download_filename', document.getElementById('hic-download-name-input').value.trim());
 
     const spinner = document.getElementById('hic-annotation-spinner');
     const btn = document.getElementById('hic-annotation-btn');
@@ -832,9 +837,11 @@
           }
           clearInterval(poll);
           const link = document.getElementById('hic-download-link');
+          const downloadName = statusData.filename || 'annotated_hic.tsv';
           link.classList.remove('d-none');
           link.href = statusData.download_url;
-          link.textContent = 'Download annotated TSV';
+          link.download = downloadName;
+          link.textContent = 'Download ' + downloadName;
           setHicStatus('Annotated Hi-C matrix ready.', false, false);
         } catch (err) {
           clearInterval(poll);
